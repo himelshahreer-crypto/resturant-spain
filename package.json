@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/postbuild.mjs",
     "start": "node scripts/serve-static.mjs out 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -16,7 +16,9 @@
     "fonts": "node scripts/fetch-fonts.mjs",
     "gen:icons": "node scripts/gen-icons.mjs",
     "extract:content": "node scripts/extract-content.mjs",
-    "codemod": "node scripts/codemod/template-to-jsx.mjs"
+    "codemod": "node scripts/codemod/template-to-jsx.mjs",
+    "images": "node scripts/optimize-images.mjs",
+    "brand": "node scripts/make-brand-images.mjs"
   },
   "dependencies": {
     "next": "16.3.8",
@@ -35,6 +37,7 @@
     "prettier": "^3.9.9",
     "react-dom18-umd": "npm:react-dom@18.3.1",
     "react18-umd": "npm:react@18.3.1",
+    "sharp": "^0.35.5",
     "typescript": "^5",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.2.7"

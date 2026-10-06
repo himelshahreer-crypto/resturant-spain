@@ -355,6 +355,17 @@ What the parity test caught in Phase 2 (all fixed, now part of the fidelity cont
 - **Behaviour suite** (`tests/e2e/behaviour.spec.ts`, 26 tests): hero autoplay (5.5 s, fake clock), dots restart the timer, parallax capped at 60 px, combo autoplay (6 s), arrow keys and buttons, header switch at 24 px, reveal and reset, ripple, hover sweep, cart persistence across reload, checkout validation and confirmation, routing and back navigation, URL filter, language switch keeps scroll and cart, returning-visitor redirect, mobile nav, journey rider follows scroll, gallery centring and dimming, FAQ, smooth scroll to combos, WhatsApp link, reduced motion.
 - Known, accepted: on Fridays and Saturdays "Abierto hoy · 12:30 – 00:00" appears after mount (the static HTML says 23:30 until then), because the HTML is built ahead of time.
 
+### Phase 4 status: done
+
+- **Images**: `pnpm images` builds `public/assets` from the design's originals: resized to the largest displayed size (avatars 48 px → 160 px files, vegetables → 320 px), recompressed, plus `.avif`/`.webp` siblings that the server sends by `Accept` header (same URLs, so the markup is unchanged). 4.92 MB → 1.13 MB as AVIF (`salad.png`: 1.17 MB → 43 KB). Decorative `<img>`s lazy-load so they don't compete with the hero; the hero image is preloaded again, as in the design.
+- **Hero first paint**: the static HTML now stacks the slides the way the slider's first run does (slide 1 on top), so the hero shows before JavaScript loads. In the design it only appeared after its script ran.
+- **Lighthouse (mobile, simulated 4G + 4× CPU)**: home 87 performance (LCP 4.0 s, was 9.7 s; FCP 1.2 s; TBT 60 ms; CLS 0), menu 89; accessibility 96 (only colour contrast, the accepted design palette); best practices 100; SEO 100.
+- **Off-screen animations pause** (~50 infinite CSS animations), resuming in view; sliders hold while the tab is hidden.
+- **Accessibility layer** (`src/legacy/a11y.ts`, no visual change): modal dialogs with focus moved in and restored, Tab trapped, Esc closes, background inert; payment as a radio group with arrow keys; form errors linked to fields; product photos labelled; gallery operable by keyboard; skip link. Parity ignores only the attributes this layer adds on elements it marks.
+- **SEO**: per-locale titles/descriptions, canonical + hreflang (x-default = es), Open Graph/Twitter, JSON-LD (`Restaurant` with opening hours, full `Menu` with prices and halal, `FAQPage`), sitemap, robots, manifest, icons from the design's "KF" tile. Needs the real domain via `SITE_URL`.
+- **Security & hosting**: strict per-page CSP (script hashes, no `unsafe-inline` for scripts), verified to produce zero violations and to fail when a hash is removed; `deploy/.htaccess` and `deploy/nginx.conf` with caching, image negotiation, compression and security headers; stylesheets versioned by content hash. See `docs/DEPLOYMENT.md`.
+- Not done (needs accounts): Sentry and analytics. Both are a few lines once a DSN / site ID exists.
+
 ## 9. Launch checklist
 
 - [ ] Parity + behaviour suites green on the production build; real-device recordings signed off

@@ -39,8 +39,11 @@ export function compareSnaps(design: Snap[], port: Snap[], limit = 40): Diff[] {
           port: String(p.rect[k]),
         });
     });
+    // The accessibility layer may add attributes the design lacks (role, aria-label, id) on the
+    // elements it marks with data-kf-a11y; anything it changes that the design *has* still counts.
+    const a11y = "data-kf-a11y" in p.attrs;
     for (const k of new Set([...Object.keys(d.attrs), ...Object.keys(p.attrs)]))
-      if (d.attrs[k] !== p.attrs[k])
+      if (k !== "data-kf-a11y" && !(a11y && d.attrs[k] === undefined) && d.attrs[k] !== p.attrs[k])
         diffs.push({ path: d.path, field: `@${k}`, design: d.attrs[k] ?? "(none)", port: p.attrs[k] ?? "(none)" });
     for (const k of Object.keys(d.style))
       if (d.style[k] !== p.style[k]) diffs.push({ path: d.path, field: k, design: d.style[k], port: p.style[k] });

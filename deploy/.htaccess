@@ -1,0 +1,67 @@
+# Kebab Factory static site: Apache / cPanel configuration.
+# Copied into out/ by `pnpm build` (scripts/postbuild.mjs). Upload the contents of out/,
+# including this hidden file, to the web root. Needs mod_rewrite, mod_headers, mod_expires
+# (enabled on almost every shared host). Nginx users: see deploy/nginx.conf.
+
+Options -Indexes
+DirectoryIndex index.html
+ErrorDocument 404 /404.html
+
+AddType image/avif .avif
+AddType image/webp .webp
+AddType application/manifest+json .webmanifest
+AddType font/woff2 .woff2
+AddDefaultCharset utf-8
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Once HTTPS works on the domain, uncomment to force it (and choose www or not):
+  # RewriteCond %{HTTPS} !=on
+  # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # Same URL, smaller file: serve the .avif/.webp sibling built by scripts/optimize-images.mjs
+  # to browsers that accept it.
+  RewriteCond %{HTTP_ACCEPT} image/avif
+  RewriteCond %{REQUEST_FILENAME}.avif -f
+  RewriteRule ^(assets/.+\.(?:jpe?g|png))$ $1.avif [T=image/avif,L]
+  RewriteCond %{HTTP_ACCEPT} image/webp
+  RewriteCond %{REQUEST_FILENAME}.webp -f
+  RewriteRule ^(assets/.+\.(?:jpe?g|png))$ $1.webp [T=image/webp,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  # Security headers (the Content-Security-Policy itself is in each page's <head>).
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Content-Security-Policy "frame-ancestors 'none'"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+  Header always set Cross-Origin-Opener-Policy "same-origin"
+  # Once the whole site is on HTTPS, uncomment (browsers then refuse plain HTTP for a year):
+  # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+  # Images vary by Accept (avif/webp/original).
+  <FilesMatch "\.(jpe?g|png|avif|webp)$">
+    Header append Vary Accept
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+  # Content-hashed or versioned: cache for a year.
+  <If "%{REQUEST_URI} =~ m#^/_next/static/#">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+  <FilesMatch "\.(woff2)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <If "%{REQUEST_URI} =~ m#^/styles/# && %{QUERY_STRING} =~ /^v=/">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+  # Pages and navigation payloads: always check for a new version.
+  <FilesMatch "\.(html|txt|xml|webmanifest)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/plain text/xml application/javascript application/json image/svg+xml application/manifest+json
+</IfModule>

@@ -295,3 +295,99 @@ test.describe("reduced motion", () => {
     await expect(page.locator('div[style*="kfmarquee"]').first()).toHaveCSS("animation-name", "none");
   });
 });
+
+test.describe("accessibility layer (no visual change)", () => {
+  async function openCart(page: Page) {
+    await open(page);
+    await page.getByRole("button", { name: "Añadir", exact: true }).first().click();
+    const floating = page.locator(".kf-floating-cart");
+    await floating.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("[data-drawer]")).toBeVisible();
+    return floating;
+  }
+
+  test("cart drawer: modal, focus moves in, Tab stays in, Esc closes and focus returns", async ({ page }) => {
+    const opener = await openCart(page);
+    const drawer = page.locator("[data-drawer]");
+    await expect(drawer).toHaveAttribute("aria-modal", "true");
+    await expect.poll(() => drawer.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+    await expect(page.locator("#kf-main")).toHaveAttribute("inert", "");
+    for (let i = 0; i < 12; i++) await page.keyboard.press("Tab");
+    expect(await drawer.evaluate((d) => d.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
+    await expect(page.locator("#kf-main")).not.toHaveAttribute("inert", "");
+    await expect(opener).toBeFocused();
+  });
+
+  test("checkout: errors are linked to their fields; payment is a radio group with arrow keys", async ({ page }) => {
+    await openCart(page);
+    const drawer = page.locator("[data-drawer]");
+    await drawer.getByRole("button", { name: /Continuar/ }).click();
+    await drawer.getByRole("button", { name: /Confirmar pedido/ }).click();
+    const name = drawer.locator("input").first();
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    const errId = await name.getAttribute("aria-describedby");
+    await expect(page.locator(`#${errId}`)).toHaveText("Introduce tu nombre.");
+    await name.fill("Laura");
+    await expect(name).toHaveAttribute("aria-invalid", "false");
+    const group = drawer.getByRole("radiogroup", { name: "Pago al recibir" });
+    await expect(group.getByRole("radio")).toHaveCount(2);
+    await group.getByRole("radio").first().focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(group.getByRole("radio").nth(1)).toHaveAttribute("aria-checked", "true");
+    await expect(group.getByRole("radio").nth(1)).toBeFocused();
+  });
+
+  test("mobile nav drawer closes with Esc", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page);
+    await page.locator(".kf-nav-hamburger").click();
+    await expect(page.locator("[data-nav-drawer]")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-nav-drawer]")).toHaveCount(0);
+  });
+
+  test("skip link is the first stop and jumps to the content", async ({ page }) => {
+    await open(page);
+    await page.keyboard.press("Tab");
+    const skip = page.locator(".kf-skip");
+    await expect(skip).toBeFocused();
+    await expect(skip).toHaveText("Saltar al contenido");
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#kf-main")).toBeFocused();
+  });
+
+  test("product photos are labelled with the dish; gallery items work from the keyboard", async ({ page }) => {
+    await open(page);
+    await expect(page.getByRole("img", { name: "Dürüm gratinado" }).first()).toBeAttached();
+    const item = page.locator(".kf-gallery-item").nth(4);
+    await item.focus();
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(() =>
+        item
+          .locator(".kf-gallery-img")
+          .evaluate((e) => parseFloat((e as HTMLElement).style.filter.match(/[\d.]+/)?.[0] ?? "0")),
+      )
+      .toBeGreaterThan(0.9);
+  });
+});
+
+test.describe("performance", () => {
+  test("off-screen sections pause their CSS animations and resume in view", async ({ page }) => {
+    await open(page);
+    const steps = page.locator("#kf-main > *").filter({ has: page.locator(".kf-steps-grid") });
+    await expect(steps).toHaveAttribute("data-kf-offscreen", "");
+    await page.locator(".kf-steps-grid").scrollIntoViewIfNeeded();
+    await expect(steps).not.toHaveAttribute("data-kf-offscreen", "");
+  });
+
+  test("sliders don't advance while the tab is hidden", async ({ page }) => {
+    await open(page, "/", { fakeClock: true });
+    await page.evaluate(() => Object.defineProperty(document, "hidden", { configurable: true, get: () => true }));
+    await page.clock.runFor(12_000);
+    await expect(heroCounter(page)).toHaveText("01 / 04");
+  });
+});

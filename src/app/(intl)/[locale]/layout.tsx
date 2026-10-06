@@ -2,9 +2,7 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { PREFIXED_LOCALES, isLocale } from "@/i18n/config";
 import { SiteDocument } from "../../site-document";
-import { siteMetadata } from "../../metadata";
 
-export const metadata = siteMetadata;
 export const dynamicParams = false;
 
 export function generateStaticParams() {

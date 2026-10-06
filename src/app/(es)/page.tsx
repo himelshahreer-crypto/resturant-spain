@@ -1,5 +1,8 @@
-// The UI is rendered by <AppShell> in the root layout (faithful port of the
-// single-page design); this route only exists so the URL selects the view.
+import { pageMetadata } from "@/lib/seo";
+import { HomePage } from "../pages";
+
+export const metadata = pageMetadata("es", "home");
+
 export default function Page() {
-  return null;
+  return <HomePage locale="es" />;
 }

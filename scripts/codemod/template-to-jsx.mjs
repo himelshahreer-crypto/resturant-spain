@@ -242,6 +242,9 @@ function genNode(node, scope, depth) {
   if (tag.includes("-")) throw new Error(`Unknown custom element <${tag}>`);
 
   const attrs = genAttrs(node, scope);
+  // Phase 4: every <img> in the design is a decorative vegetable (alt=""). Lazy-load them so they
+  // don't compete with the hero image (React would otherwise preload the first ones). No visual change.
+  if (tag === "img") attrs.push('loading="lazy"', 'decoding="async"');
   const open = `<${tag}${attrs.length ? " " + attrs.join(" ") : ""}`;
   if (VOID.has(tag)) return `${open} />`;
   const kids = genChildren(tag === "template" ? node.content : node, scope, depth + 1);

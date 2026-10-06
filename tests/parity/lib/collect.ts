@@ -3,7 +3,8 @@ import type { Page } from "@playwright/test";
 /** Root of the page content in each implementation (same depth under <body>). */
 export const ROOTS = {
   design: "#dc-root > .sc-host > *",
-  port: "#kf-root > .kf-host > *",
+  // Pages add JSON-LD <script>s next to the app; they are not part of the design.
+  port: "#kf-root > .kf-host > :not(script)",
 } as const;
 
 export interface Snap {
@@ -90,6 +91,7 @@ const ATTRS = [
   "data-noripple",
   "data-pop",
   "data-screen-label",
+  "data-kf-a11y",
 ];
 
 /**

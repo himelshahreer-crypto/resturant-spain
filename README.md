@@ -5,6 +5,7 @@ A Next.js 16 port of the Claude Design export in `design/`, built to look and be
 
 - `design/`: the original design export. The source of truth for look and behaviour; never edited.
 - `docs/NEXTJS_MIGRATION_PLAN.md`: the plan, phases and fidelity contract. `docs/PLAN_REVIEW.md`: the review behind it.
+- `docs/DEPLOYMENT.md`: how to build and upload to your hosting (Apache/cPanel or Nginx).
 
 ## Requirements
 
@@ -28,5 +29,4 @@ To view the original design next to the port: `node scripts/serve-static.mjs des
 
 ## Deploying to your hosting
 
-`pnpm build` writes a plain static site to `out/` (`/index.html`, `/ca/index.html`, `/en/index.html`, assets, fonts).
-Upload the contents of `out/` to the web root of any web server (Apache, Nginx, cPanel, or a Node server). No server-side code is needed.
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). In short: `SITE_URL=https://your-domain pnpm build`, then upload the contents of `out/` (including `.htaccess`) to the web root.

@@ -21,11 +21,28 @@ export async function freezeTime(page: Page) {
 
 // A capture advances the fake clock by < 1 s in total, far below the 5.5 s hero autoplay.
 
-/** Waits for fonts and images (call after navigation). */
+/**
+ * Waits for fonts and for the images the browser will actually load: eager ones, and lazy
+ * ones in or near the viewport (Chrome's lazy-load margin is ≥ 1250 px). A lazy image far
+ * off screen never loads, so waiting on it would hang. (The 10 s cap only applies on a real
+ * clock; under the harness's paused fake clock the load/error events end the wait.)
+ */
 export async function loadAssets(page: Page) {
   await page.evaluate(async () => {
     await document.fonts.ready;
-    await Promise.all([...document.images].map((img) => (img.complete ? null : img.decode().catch(() => null))));
+    const willLoad = (img: HTMLImageElement) => {
+      if (img.loading !== "lazy") return true;
+      const r = img.getBoundingClientRect();
+      return r.bottom > -1250 && r.top < innerHeight + 1250;
+    };
+    const settled = (img: HTMLImageElement) =>
+      new Promise<void>((resolve) => {
+        if (img.complete) return resolve();
+        img.addEventListener("load", () => resolve(), { once: true });
+        img.addEventListener("error", () => resolve(), { once: true });
+        setTimeout(resolve, 10_000);
+      });
+    await Promise.all([...document.images].filter(willLoad).map(settled));
   });
 }
 

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ReactNode } from "react";
 import type { Locale } from "@/content/types";
 import { AppShell } from "@/legacy/AppShell";
@@ -5,6 +8,8 @@ import { toDesignData } from "@/legacy/design-data";
 import { getMenuRepository } from "@/lib/menu/repository";
 import { DEFAULT_LOCALE } from "@/i18n/config";
 import { LOCALE_REDIRECT_SCRIPT } from "@/i18n/locale-redirect";
+
+const SKIP_LABEL: Record<Locale, string> = { es: "Saltar al contenido", ca: "Vés al contingut", en: "Skip to content" };
 
 /**
  * The design's CSS is served as-is from public/styles, not through the Next.js CSS pipeline:
@@ -18,7 +23,16 @@ const STYLESHEETS = [
   "/styles/pseudo.css",
   // First paint of the transparent header before the app mounts (see the file).
   "/styles/prehydrate.css",
+  // Invisible additions: off-screen animation pause, skip link.
+  "/styles/enhancements.css",
 ];
+
+/** `?v=<content hash>` so the server can cache stylesheets for a year (computed at build time). */
+const versioned = (href: string) =>
+  `${href}?v=${createHash("sha256")
+    .update(readFileSync(join(process.cwd(), "public", href)))
+    .digest("hex")
+    .slice(0, 10)}`;
 
 /**
  * The <html>/<body> shell shared by every root layout (one per locale group).
@@ -37,10 +51,14 @@ export async function SiteDocument({ locale, children }: { locale: Locale; child
         )}
         <link rel="preload" as="font" type="font/woff2" href="/fonts/inter-latin.woff2" crossOrigin="anonymous" />
         {STYLESHEETS.map((href) => (
-          <link key={href} rel="stylesheet" href={href} />
+          <link key={href} rel="stylesheet" href={versioned(href)} />
         ))}
       </head>
       <body>
+        {/* Skip link (invisible until focused). Outside #kf-root so the design's tree is unchanged. */}
+        <a className="kf-skip" href="#kf-main">
+          {SKIP_LABEL[locale]}
+        </a>
         {/* Same wrapper depth as the design runtime (#dc-root > .sc-host), see runtime-parity.css */}
         <div id="kf-root">
           <div className="kf-host">

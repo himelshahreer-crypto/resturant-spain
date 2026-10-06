@@ -3,6 +3,7 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 
 const [dir = "out", port = "4200"] = process.argv.slice(2);
 const root = resolve(dir);
@@ -38,15 +39,36 @@ createServer(async (req, res) => {
     res.writeHead(403).end();
     return;
   }
-  const file = await find(target);
+  let file = await find(target);
+  // Mirror the production rules (deploy/.htaccess, nginx.conf): modern image formats by Accept.
+  let vary = false;
+  if (file && /\/assets\/.+\.(jpe?g|png)$/.test(file)) {
+    vary = true;
+    const accept = req.headers.accept || "";
+    for (const ext of ["avif", "webp"]) {
+      if (accept.includes(`image/${ext}`) && (await find(`${file}.${ext}`))) {
+        file = `${file}.${ext}`;
+        break;
+      }
+    }
+  }
   if (!file) {
     const nf = await find(join(root, "404.html"));
     res.writeHead(404, { "content-type": TYPES[".html"] }).end(nf ? await readFile(nf) : "Not found");
     return;
   }
+  const type = TYPES[extname(file)] || "application/octet-stream";
+  let body = await readFile(file);
+  // Compress text like the production server does (deploy/.htaccess mod_deflate, nginx gzip).
+  const gzip =
+    /^(text\/|application\/(json|javascript)|image\/svg)/.test(type) &&
+    /gzip/.test(req.headers["accept-encoding"] || "");
+  if (gzip) body = gzipSync(body);
   res.writeHead(200, {
-    "content-type": TYPES[extname(file)] || "application/octet-stream",
+    "content-type": type,
     "cache-control": "no-store",
+    ...(vary ? { vary: "Accept" } : {}),
+    ...(gzip ? { "content-encoding": "gzip" } : {}),
   });
-  res.end(await readFile(file));
+  res.end(body);
 }).listen(Number(port), () => console.log(`serving ${root} on http://localhost:${port}`));

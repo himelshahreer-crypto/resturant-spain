@@ -18,6 +18,8 @@ import { Component, createElement, useEffect, useRef } from "react";
 import type { Locale } from "@/content/types";
 import { getMessages, format } from "@/i18n/messages";
 import { markAppMounted } from "@/components/icon/mount-phase";
+import { startOffscreenPause } from "./offscreen-pause";
+import { DialogFocus, enhance, handleKey } from "./a11y";
 import { DesignTemplate } from "./DesignTemplate";
 import type { DesignData } from "./design-data";
 import { getOrderService, type PlacedOrder } from "@/lib/orders/service";
@@ -68,7 +70,19 @@ function Slider(p: { slides: any[]; idx: number }) {
   return (
     <div ref={ref} style={{ position: "absolute", inset: 0, isolation: "isolate" }}>
       {p.slides.map((s, i) => (
-        <div key={i} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+        // Initial stacking = what the effect below sets on its first run (current slide on top,
+        // others hidden), so the static HTML already shows the right slide: the hero image can
+        // paint before JavaScript loads. The design only got there after its script ran.
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            inset: 0,
+            overflow: "hidden",
+            zIndex: i === p.idx ? 2 : 0,
+            visibility: i === p.idx ? "visible" : "hidden",
+          }}
+        >
           <div style={{ position: "absolute", inset: 0 }}>
             {s.video ? (
               <video
@@ -321,12 +335,21 @@ export class KebabApp extends Component<Props, any> {
       it.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
     };
     document.addEventListener("click", this.onGalleryClick);
+    const kfRoot = document.querySelector<HTMLElement>("#kf-root > .kf-host");
+    if (kfRoot) this.stopOffscreenPause = startOffscreenPause(kfRoot);
+    // Accessibility layer (no visual change): semantics, focus, keyboard. See a11y.ts.
+    this.dialogFocus = new DialogFocus();
+    this.applyA11y();
+    this.onA11yKey = (e: KeyboardEvent) => handleKey(e, () => this.closeTopDialog());
+    document.addEventListener("keydown", this.onA11yKey);
     // Icons mounted from now on render like the design's later-mounted <kf-i> (see Icon.tsx).
     markAppMounted();
     // Signals that effects are wired (used by the parity harness; no visual effect).
     document.documentElement.setAttribute("data-kf-ready", "");
   }
   componentWillUnmount() {
+    document.removeEventListener("keydown", this.onA11yKey);
+    if (this.stopOffscreenPause) this.stopOffscreenPause();
     clearInterval(this.tick);
     clearInterval(this.slideT);
     clearInterval(this.comboT);
@@ -355,6 +378,7 @@ export class KebabApp extends Component<Props, any> {
     if (location.search !== search) history.replaceState(history.state, "", location.pathname + search + location.hash);
   }
   componentDidUpdate(prevProps: Props) {
+    this.applyA11y();
     // Arriving on /menu/ (incl. back/forward): a ?cat= in the URL wins; otherwise mirror the state.
     const urlCats = prevProps.view !== this.props.view && this.props.view === "menu" ? this.catsFromUrl() : null;
     if (urlCats && urlCats.join(",") !== (this.state.cat || []).join(",")) this.setState({ cat: urlCats });
@@ -403,17 +427,31 @@ export class KebabApp extends Component<Props, any> {
       });
     }
   }
+  applyA11y() {
+    const root = document.querySelector("#kf-root > .kf-host");
+    if (!root) return;
+    enhance(root, { payTitle: getMessages(this.state.lang || "es").payTitle });
+    this.dialogFocus?.update(root);
+  }
+  /** Esc: closes the dialog in front (confirmation, cart drawer, nav drawer). */
+  closeTopDialog(): boolean {
+    if (this.state.confirm) this.setState({ confirm: null });
+    else if (this.state.drawer) this.setState({ drawer: false });
+    else if (this.state.navMenu) this.setState({ navMenu: false });
+    else return false;
+    return true;
+  }
   restartSlides() {
     clearInterval(this.slideT);
     this.slideT = setInterval(() => {
-      if (this.state.view === "home" && this.props.motion !== false)
+      if (this.state.view === "home" && this.props.motion !== false && !document.hidden)
         this.setState((st: any) => ({ heroIdx: ((st.heroIdx || 0) + 1) % this.props.data.SLIDES.length }));
     }, 5500);
   }
   restartCombos() {
     clearInterval(this.comboT);
     this.comboT = setInterval(() => {
-      if (this.state.view === "home" && this.props.motion !== false) {
+      if (this.state.view === "home" && this.props.motion !== false && !document.hidden) {
         const n = this.state.items.filter((i: any) => i.cat === "combos").length || 1;
         this.setState((st: any) => ({ combosIdx: ((st.combosIdx || 0) + 1) % n }));
       }
