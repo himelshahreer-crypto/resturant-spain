@@ -1,7 +1,8 @@
-# Kebab Factory: Next.js migration plan
+# Kebab Factory: Next.js migration plan (v2)
 
 **Source of truth:** `design/index.html` (Claude Design export, "Kebab Factory v3 Hearth")
 **Goal:** A production Next.js app that looks and behaves exactly like the design at every breakpoint, including every animation, scroll effect and interaction, and that can be maintained and extended for years.
+**Status:** v2, rewritten after the red-team review in [`PLAN_REVIEW.md`](PLAN_REVIEW.md). Scope: frontend only; backend and admin later.
 
 ---
 
@@ -64,8 +65,8 @@ This is the checklist QA signs off against. Every row gets a Playwright test (be
 | 22 | "Open today" pill | Pulsing green dot; closing time 00:00 on Fri/Sat, else 23:30 | Computed in **Europe/Madrid** time, not the visitor's or the server's timezone |
 | 23 | WhatsApp FAB | Fixed, green, pulse ring, links to `wa.me/c/34683275326` | Server component |
 | 24 | Mobile nav (<860) | Hamburger opens a left drawer with Home/Menu (current page highlighted) and language buttons | Client component, adds focus trap + Esc (see §6) |
-| 25 | Cart drawer | Right drawer slides in (320 ms). Steps: empty → cart lines → checkout form (4 fields with inline validation in 3 languages, cash/card radio) → place order | Client component; form via React Hook Form + Zod (same rules) and a Server Action |
-| 26 | Confirmation modal | Enters in 380 ms; green ring animates from empty to the remaining-time fraction over 1 s; minutes count down (refresh every 15 s); "Back to the menu" goes to `/menu` | Client component; data comes from the real order response |
+| 25 | Cart drawer | Right drawer slides in (320 ms). Steps: empty → cart lines → checkout form (4 fields with inline validation in 3 languages, cash/card radio) → place order | Client component; form via React Hook Form + Zod (same rules), submitted through `OrderService` (§3) |
+| 26 | Confirmation modal | Enters in 380 ms; green ring animates from empty to the remaining-time fraction over 1 s; minutes count down (refresh every 15 s); "Back to the menu" goes to `/menu` | Client component; data comes from `OrderService.placeOrder()` |
 | 27 | Language | ES (default) / CA / EN toggle in header and drawer; `<html lang>` updates | Locale in the URL (`/`, `/ca`, `/en`) with next-intl; toggle keeps the same look |
 | 28 | Persistence | Cart, language, filters and FAQ state survive reload and sync across tabs | Zustand `persist` (versioned key, migrations) + `storage` event sync. **The checkout form is not persisted** (personal data, see §7) |
 | 29 | Reduced motion | `prefers-reduced-motion: reduce` kills every animation and transition (`*{animation:none!important;transition:none!important}`); also the JS-driven ones | Same global rule, and all JS motion checks a `useReducedMotion()` hook |
@@ -73,280 +74,266 @@ This is the checklist QA signs off against. Every row gets a Playwright test (be
 
 ---
 
-## 2. Tech stack (and why)
+## 2. Decisions this plan is built on
 
-| Concern | Choice | Reason |
+| Decision | Choice | Consequence |
 | --- | --- | --- |
-| Framework | **Next.js, latest stable, App Router**, React 19, TypeScript `strict` | Server components for the mostly static content, small client islands for the interactive parts |
-| Styling | **CSS Modules + one global tokens/keyframes file** | The design is hand-tuned CSS full of `clamp()`, container queries, mask images and 30+ keyframes. Moving it to CSS Modules is close to copy-paste, which is the lowest-risk path to "looks exactly the same". Tailwind would mean translating every value into arbitrary classes, with more room for drift |
-| Fonts | `next/font/google` Inter, variable axis 400–800, `display: swap` | Self-hosted, no layout shift, no third-party request |
-| Images | `next/image` (AVIF/WebP, responsive `sizes`) | The 15 MB of source photos (e.g. `salad.png` 1.2 MB) shrinks to tens of KB per image. Every `background-image` in the design becomes `<Image fill style={{objectFit:'cover', objectPosition: <same value>}}>` inside the same box, so framing is identical |
-| Icons | `<Icon name size stroke>` server component rendering the same 66 SVG paths from `kf-icons.js` | No web component, no shadow DOM, no JS, same pixels |
-| i18n | **next-intl**, locales `es` (default, no prefix), `ca`, `en`; messages in JSON | Real URLs per language for SEO, `hreflang`, translations editable without touching components |
-| Client state | **Zustand** + `persist` | Small, works outside React (needed for the cart-bump and global effects), simple versioned migrations |
-| Forms | React Hook Form + **Zod** (one schema shared by client and server) | Same validation messages as the design, enforced on the server too |
-| Orders backend | Next.js **Server Action** → Postgres (Neon or Supabase) via **Drizzle ORM** | Real orders, server-side price calculation, audit trail |
-| Notifications | Restaurant: WhatsApp Business Cloud API or Telegram bot (owner's choice), with email fallback. Customer: confirmation email via Resend | The design promises "We sent a confirmation to …", so it has to be true |
-| Abuse protection | Upstash rate limit on the order action + Cloudflare Turnstile (invisible) + honeypot field | Public form that triggers real deliveries |
-| Content (later) | Typed data files first (`src/content/*.ts`), moved to a CMS or the owner dashboard in Phase 6 | No CMS cost on day one; data shape designed so the move is mechanical |
-| Hosting | **Vercel** (preview deploy per PR, edge CDN, image optimisation) | Zero-ops; alternatives: Netlify, or Docker on a VPS via `output: 'standalone'` |
-| Analytics | Vercel Web Analytics or Plausible (cookieless) | No cookie banner needed for analytics |
-| Errors | Sentry (client + server) | Catch checkout failures in production |
-| Tooling | pnpm, ESLint (next + jsx-a11y), Prettier, Stylelint, Husky + lint-staged, Commitlint (conventional commits), Renovate | Standard hygiene |
-| Testing | Vitest + Testing Library (logic/components), **Playwright** (e2e + visual regression), axe-core (a11y), Lighthouse CI (performance budgets) | See §5 |
+| Scope now | **Frontend only.** Backend and admin panel come later | Ship the customer site exactly as designed; the cart and checkout behave as in the prototype, behind interfaces the backend plugs into later |
+| Order flow (later) | Own backend + admin dashboard | The frontend talks to an `OrderService` interface; today a local implementation, later a Server Action. No component changes when it switches |
+| Menu editing (later) | Owner edits from the admin panel | The frontend reads the menu through a `MenuRepository` interface; today typed files in the repo, later the database/CMS |
+| Fidelity | **Pixel-exact, no visual changes**, including the contrast and focus-ring issues in §11 | Every visible change needs explicit sign-off. Accessibility work is limited to things that don't change pixels |
+| Context | **Real client, launch ASAP** | Tight scope; anything not visible in the design waits |
 
 ---
 
-## 3. Target architecture
+## 3. Seams for the backend (built now, used later)
 
-### 3.1 Routes
+The frontend is built so the backend can be added without touching UI components:
+
+```ts
+// src/lib/menu/repository.ts
+interface MenuRepository {
+  getCategories(): Promise<Category[]>;
+  getItems(): Promise<MenuItem[]>;
+  getHomeContent(): Promise<HomeContent>;     // slides, popular, reviews, timeline, gallery, FAQ
+  getSettings(): Promise<SiteSettings>;       // ETA, opening hours, WhatsApp number
+}
+// now:   StaticMenuRepository  → reads src/content/*.ts (data copied verbatim from the design)
+// later: CmsMenuRepository     → reads the database / CMS, same types
+
+// src/lib/orders/service.ts
+interface OrderService {
+  placeOrder(input: OrderInput): Promise<PlacedOrder>;   // { ref, etaMinutes, createdAt, totalCents, … }
+}
+// now:   LocalOrderService    → exactly what the prototype does (validate, KF-1047 ref, local only)
+// later: RemoteOrderService   → Server Action, server-side pricing, notifications
+```
+
+- Content types use the shapes a CMS would use (localised fields as `{ es, en, ca? }`, integer `priceCents`, `available` flag), so the later migration is a data import, not a refactor.
+- Pages are statically generated and read content only through the repository, so switching to a database later means swapping one implementation and adding `revalidateTag`.
+- **Recommended backend later:** Payload 3, an open-source CMS that runs inside the same Next.js app and gives the owner an admin at `/admin` with per-field translations (ES/CA/EN), image uploads and access control out of the box. Add Postgres (Neon), a custom live order board, a Telegram/email alert and Resend for customer emails. Estimated +6–9 days when the time comes.
+
+**Placeholder honesty:** until the backend exists, an order placed on the live site goes nowhere, same as the prototype. So either (a) the site launches with checkout active only on preview/staging, or (b) the "Confirmar pedido" button is wired to send the order as a prefilled WhatsApp message to the restaurant as a stopgap (no visual change to the page; the confirmation modal still shows). **Decide before going public** (§11, Q2).
+
+---
+
+## 4. Port strategy: faithful first, clean second
+
+The single biggest risk is visual drift while turning ~900 lines of inline-styled template into components. So the port happens in two separate, test-guarded steps.
+
+### Step 1: mechanical port (faithful by construction)
+
+A one-off **codemod** (Node + `parse5`) reads `design/index.html` and emits JSX:
+
+| Design construct | Becomes |
+| --- | --- |
+| `style="a:b;c:{{ x }}"` | `style={{ a: 'b', c: x }}` |
+| `style-hover` / `style-active` / `style-focus` | A generated class in `pseudo.css` with the **same `!important` semantics** the runtime uses (`.p12:hover{background:#E63E00!important}`), so inline styles are overridden exactly as in the prototype |
+| `<sc-if value>` / `<sc-for list as>` | `{cond && …}` / `{list.map(…)}` (renders no wrapper element, same as the runtime) |
+| `<kf-i n s w>` | `<Icon name size stroke>` rendering the same SVG paths (span `inline-flex`, `line-height: 0`, like the web component) |
+| `onClick="{{ fn }}"` | `onClick={fn}` |
+| `renderVals()` | Typed selector functions (`selectHeroVM(state, lang)` etc.) ported line by line |
+| The `<style>` block | `globals.css`, copied verbatim |
+
+The output is ugly (inline styles everywhere) but it renders **the same DOM tree with the same computed styles**. That's what makes step 2 safe.
+
+### Step 2: refactor under test
+
+Section by section, move inline styles into CSS Modules + tokens and split components, **keeping the DOM structure unchanged**. The parity test (§6) runs on every commit; a refactor that moves one pixel fails it immediately and names the element.
+
+### Images without changing the DOM
+
+Switching `background-image` divs to `<img>` would change the DOM and break parity. Instead:
+- **Content images** stay as `background-image`, but the URL comes from Next's `getImageProps()` (optimised AVIF/WebP at the right width) wrapped in CSS `image-set()` for 1×/2×. Same element, same `background-position`, a fraction of the bytes.
+- **Hero slide 1** (the LCP element) gets a `<link rel="preload" as="image" imagesrcset>` so it paints as fast as an `<img priority>` would.
+- Later, images uploaded through the admin get generated sizes, and the chosen focal point becomes the `background-position`.
+
+---
+
+## 5. Architecture
+
+### 5.1 Stack
+
+| Concern | Choice |
+| --- | --- |
+| App | Next.js (latest stable, App Router), React 19, TypeScript strict, pnpm |
+| Styling | Step 1: generated inline styles + `pseudo.css`. Step 2: CSS Modules + `tokens.css` + verbatim `keyframes.css` |
+| Fonts | `next/font/google` Inter 400–800 (self-hosted, no layout shift) |
+| Images | `getImageProps()` + `image-set()` on the design's background-image elements (§4) |
+| Icons | `<Icon>` server component, same 66 SVG paths as `kf-icons.js` |
+| i18n | next-intl, `es` at `/` (no prefix), `/ca`, `/en`; UI strings in `messages/*.json`; content localised in `src/content` |
+| Client state | Zustand + `persist` (versioned key, `migrate()`), cross-tab sync via `storage` event; checkout form not persisted |
+| Forms | React Hook Form + Zod, same validation rules and messages as the design (schema reused by the backend later) |
+| Hosting | Vercel Pro (Hobby doesn't allow commercial use), or Cloudflare Pages / Netlify. With no backend the site can even be a static export |
+| Monitoring | Sentry (client), Vercel Analytics, uptime monitor |
+| Tests | Vitest, Playwright (behaviour + parity + visual), axe (non-visual checks only) |
+
+### 5.2 Routes
 
 ```
-/                 Home (es)          /ca, /en           Home (ca, en)
-/menu             Menu (es)          /ca/menu, /en/menu
-/menu?cat=tacos   Menu, filtered (the "Fried Tacos are here" button and category cards link here)
-/legal/aviso-legal, /legal/privacidad, /legal/cookies     (new, required in Spain, see §7)
-/api/health       uptime check
-sitemap.xml, robots.txt, opengraph-image, icon/apple-icon, manifest.webmanifest
+/  /ca  /en                  Home
+/menu  /ca/menu  /en/menu    Menu (?cat=tacos supported, URL-synced)
+sitemap.xml  robots.txt  opengraph-image  icon  manifest.webmanifest
 ```
 
-`not-found.tsx` and `error.tsx` styled with the design's tokens.
+### 5.3 Content model (typed files now, database later)
 
-### 3.2 Folder structure
+```ts
+Category { id, name: Localized, icon: IconName, isNew?, sortOrder }
+MenuItem {
+  id, categoryId, name: Localized, description: Localized, priceCents: number,
+  image: string, imagePosition: string, badge?: Localized,
+  allergens: AllergenCode[], halal?: boolean, available: boolean, sortOrder
+}
+HomeContent { slides, popular, reviews, timeline, journey, gallery, faq, marquee }
+SiteSettings { etaMinutes: 45, hours: [...], timezone: 'Europe/Madrid', whatsappNumber, mapsUrl }
+```
+
+All data is copied verbatim from the design's `Component` class (23 items, 6 categories, 3 languages). Unit tests check that every item has all languages, every image file exists and ids are unique. The prototype's fake `orders` array and other admin leftovers are **not** carried over.
+
+### 5.4 Checkout behaviour (identical to the prototype)
+
+Cart → "Continuar" → 4-field form with the design's validation messages → payment choice → "Confirmar pedido" → `OrderService.placeOrder()` → the design's confirmation modal with ref `KF-1047`, ring animation and live countdown → "Volver al menú" goes to `/menu`. The cart empties, as in the design.
+
+### 5.5 Rendering and caching
+
+- Home and Menu: statically generated per locale (fast from the CDN). When the backend arrives, add on-demand revalidation when the owner saves.
+- The "Abierto hoy · 12:30 – 23:30/00:00" pill and the cart total render in client islands (server outputs a fixed-width placeholder), so there's no hydration mismatch and no layout shift. The time is computed in Europe/Madrid.
+- One shared rAF scroll loop drives hero parallax, the journey rider and gallery dimming. One `IntersectionObserver` + `MutationObserver` drives reveals. Delegated listeners do the ripple and sweep effects.
+
+### 5.6 Folder structure
 
 ```
 src/
-  app/
-    [locale]/
-      layout.tsx            html lang, fonts, header, footer, WhatsApp FAB, providers
-      page.tsx              Home (server component, composes sections)
-      menu/page.tsx         Menu
-      legal/[slug]/page.tsx
-    actions/place-order.ts  Server Action
-    sitemap.ts  robots.ts  opengraph-image.tsx  manifest.ts
-  components/
-    layout/      UtilBar, SiteHeader, LangSwitch, MobileNav, SiteFooter, WhatsAppFab
-    home/        Hero, HeroSlider, Marquee, CategoryGrid, HomeMenu, ComboSlider,
-                 PopularGrid, HowItWorks, Reviews, Journey (Vertical, Horizontal),
-                 Gallery, Faq, FaqPhotoGrid, FindUs
-    menu/        MenuHeader, CategoryChips, MenuSearch, MenuSection, NoResults
-    product/     ProductCard, PopularCard, AddToCart (stepper), Tags
-    cart/        CartButton, FloatingCart, CartDrawer, CartLines, CheckoutForm,
-                 PaymentOptions, OrderConfirmation
-    decor/       VegLayer, Icon
-    effects/     RevealProvider, InteractionEffects (ripple + sweep), ScrollFrameProvider
-  content/       categories.ts, items.ts, allergens.ts, slides.ts, popular.ts,
-                 reviews.ts, timeline.ts, gallery.ts, faq.ts, veg-layouts.ts, site.ts
-  i18n/          routing.ts, request.ts   messages/{es,ca,en}.json
-  lib/           money.ts, hours.ts (Europe/Madrid), cart-store.ts, order-schema.ts,
-                 use-reduced-motion.ts, use-scrolled.ts, use-interval.ts
-  server/        db/schema.ts, db/client.ts, notify/{whatsapp,email}.ts, rate-limit.ts
-  styles/        tokens.css, globals.css, keyframes.css
-design/          original export, never edited (used by visual tests)
-tests/           e2e/, visual/, unit/
+  app/[locale]/{layout,page}.tsx   app/[locale]/menu/page.tsx
+  components/  layout/ home/ menu/ product/ cart/ decor/ effects/  (one folder per section)
+  content/     categories.ts items.ts allergens.ts home.ts settings.ts
+  lib/         menu/repository.ts orders/service.ts money.ts hours.ts cart-store.ts
+               order-schema.ts selectors/*.ts use-reduced-motion.ts use-scrolled.ts
+  styles/      tokens.css globals.css keyframes.css pseudo.css
+  i18n/  messages/{es,ca,en}.json
+scripts/codemod/   the one-off template → JSX converter (kept for reference)
+design/            the original export, never edited
+tests/  parity/ e2e/ visual/ unit/ fixtures/vendor/ (React 18.3.1, ReactDOM, Babel 7.29.0)
 ```
 
-### 3.3 Server vs client split
+---
 
-- **Server components (zero JS):** UtilBar, Marquee, CategoryGrid, PopularGrid markup, HowItWorks, Reviews, JourneyHorizontal, FaqPhotoGrid, FindUs, VegLayer, Icon, Footer, WhatsAppFab, MenuSection markup.
-- **Client islands:** SiteHeader (scroll state), MobileNav, HeroSlider, HomeMenu filter, ComboSlider, JourneyVertical (scroll-linked rider), Gallery, Faq, AddToCart, CartButton, FloatingCart, CartDrawer, OrderConfirmation, RevealProvider, InteractionEffects, ScrollFrameProvider.
-- **One shared rAF scroll loop** feeds the hero parallax, the journey rider and the gallery. The design attaches three scroll listeners (window, resize, document capture), so this is the same behaviour with less work per frame.
+## 6. Proving it's identical
 
-### 3.4 Design tokens (extracted from the inline styles)
+1. **Deterministic baseline.** The original runs from `design/` with React, ReactDOM and Babel served from `tests/fixtures/vendor/` (same files as unpkg, SRI hashes verified, so no network dependency; unpkg is already blocked in some environments). Time is frozen (`Date.now`, timers) so the "open today" pill and countdown are stable. Fonts and images are awaited.
+2. **Structural parity test (primary gate).** Both pages render in the same browser at **360, 390, 414, 768, 1024, 1280, 1440, 1920** and in each state (top, scrolled, menu filtered, search empty, drawer cart/checkout/errors, confirmation, mobile nav, each language). A script walks both DOM trees in document order and compares each element's tag, bounding box (±1 px) and computed `color`, `background-color`, `font-*`, `border-*`, `border-radius`, `box-shadow`, `opacity`, `transform`. The first mismatch is reported as a path (`main > section[2] > article[3] > h3`) with both values. This catches drift that pixel diffs miss and never flakes on anti-aliasing.
+3. **Pixel diff (secondary).** Per-section screenshots compared with a realistic threshold, run in one pinned Playwright Docker image so font rendering is identical between runs.
+4. **Behaviour tests** for every row of the §1 fidelity contract (slider timing, header switch at 24 px, combo ← → keys, rider position follows scroll, reveal resets on exit, cart persists across reload and tabs, …).
+5. **Real devices.** iPhone (Safari) and a mid-range Android (Chrome), recorded side by side with the original for the hero, combos, journey, gallery and how-it-works. Client signs off on the recordings.
+6. After sign-off, the port's own screenshots become the baseline, so later changes can't silently alter the look.
 
-```css
-:root {
-  --kf-orange: #FF4D1C;     --kf-orange-600: #E63E00;  --kf-orange-700: #B83A00;
-  --kf-lime: #C6FF3D;       --kf-lime-soft: #D9FF6B;
-  --kf-ink: #2C1D12;        --kf-ink-950: #1B120C;     --kf-ink-combos: #1C130D;
-  --kf-cream: #FFF8F2;      --kf-peach-50: #FFEEE3;    --kf-peach-100: #FFE4D6;
-  --kf-peach-200: #FCE0CC;  --kf-peach-300: #FFDCC0;   --kf-muted: #8A7160;
-  --kf-green: #2E6B4C;      --kf-green-50: #E7F0E8;    --kf-error: #D6362A;
-  --kf-star: #FFC107;       --kf-whatsapp: #25D366;
-  --kf-radius-sm: 10px; --kf-radius-md: 14px; --kf-radius-lg: 18px; --kf-radius-pill: 999px;
-  --kf-container: 1240px;   --kf-gutter: clamp(18px, 4vw, 40px);
-  --kf-section-y: clamp(64px, 8vw, 104px);
-  --kf-shadow-card: 0 8px 24px -8px rgba(80,40,10,.18);
-  --kf-ease-reveal: cubic-bezier(.2,1.08,.3,1);
-}
+---
+
+## 7. Quality bar
+
+**Performance** (measured on a mid-range Android and with 4× CPU throttling, not just on a laptop)
+- [ ] LCP < 2.5 s on 4G, CLS < 0.05, INP < 200 ms
+- [ ] First-load JS on `/` ≤ 130 KB gzip (the prototype ships React + ReactDOM + Babel standalone ≈ 1.5 MB and compiles in the browser)
+- [ ] Images: AVIF/WebP via `getImageProps`, lazy below the fold. Decorative vegetables at ~160 px
+- [ ] Off-screen infinite animations paused with `animation-play-state` (37 floating images, marquee, steps, journey, FAB pulse, sign). Identical look, much less CPU and battery
+- [ ] All pages statically generated; no server work per request
+
+**Accessibility (only what doesn't change pixels, per the fidelity decision)**
+- [ ] Drawers/modal: `aria-modal`, focus trap, Esc closes, focus returns to the trigger, background `inert`, scroll lock
+- [ ] Payment options as a proper `radiogroup` with arrow keys; form errors linked via `aria-describedby`; first invalid field focused
+- [ ] Autoplay sliders pause on hover, focus and hidden tab; gallery items keyboard-reachable; `alt` text via `role="img"` + `aria-label` on background-image elements; skip link (visually hidden)
+- [ ] Known, accepted visual issues (contrast, input focus ring) documented in §11, not silently "fixed"
+
+**SEO**
+- [ ] Per-locale title and description, `hreflang` + `x-default`, canonical, sitemap, robots
+- [ ] JSON-LD: `Restaurant` (address, geo, `openingHoursSpecification` from Settings), `Menu`/`MenuItem` with prices, `FAQPage`
+- [ ] OG image via `next/og`; favicon set and manifest
+
+**Security**
+- [ ] Security headers (CSP, HSTS, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `frame-ancestors 'none'`)
+- [ ] No secrets in the client; `.env.example` documented; Renovate + `pnpm audit` in CI
+
+**Code health**
+- [ ] TypeScript strict, typed content; no `any`
+- [ ] Money in integer cents, one `formatPrice()` (keeps the design's `7.90 €` format)
+- [ ] Persisted cart store versioned with `migrate()`; cart lines referencing deleted or unavailable items are dropped with a notice
+- [ ] Components ≤ ~200 lines after Step 2; ADRs for port-first strategy, parity testing and the backend seams
+
+**CI/CD** (GitHub Actions)
+```
+PR:   lint · typecheck · unit · build · e2e · parity · visual · Lighthouse (perf/SEO) · bundle size
+      → Vercel preview deployment
+main: same → production deploy → Sentry release
+cron: nightly production smoke test (browse, add to cart, open checkout)
 ```
 
-Hex values are taken as-is from the design. We name them; we don't change them.
+**Operations**
+- [ ] Sentry alerts on client errors; uptime monitor on `/`
+- [ ] All accounts (domain, hosting, analytics) **owned by the client**, developer invited
+- [ ] Monthly cost shared with the client: hosting $0–20, domain ~€12/year
 
-### 3.5 Data model (content + orders)
-
-```ts
-type Locale = 'es' | 'ca' | 'en';
-type Localized = Record<'es' | 'en', string> & { ca?: string };   // ca falls back to es, as in the design
-
-interface Category { id: string; name: Localized; icon: IconName; isNew?: boolean; sort: number }
-interface MenuItem {
-  id: string; categoryId: string; name: Localized; description: Localized;
-  priceCents: number;                 // integers, the design uses floats (7.9)
-  image: string; imagePosition: string; badge?: Localized;
-  allergens: AllergenCode[]; halal?: boolean; available: boolean; sort: number;
-}
-// DB: orders(id, ref 'KF-1047', status, created_at, eta_min, customer_name, email, phone,
-//     address, payment 'cash'|'card', total_cents, locale)  order_lines(order_id, item_id, name_snapshot, qty, unit_cents)
-```
-
-The server never trusts client prices. It recalculates the total from `item_id × qty` before saving.
+**Business metrics** (Vercel Analytics custom events)
+- [ ] `menu_view → add_to_cart → checkout_start → order_placed`, average basket, language split
 
 ---
 
-## 4. Delivery plan (phases, each ends with a reviewable PR and a preview URL)
+## 8. Delivery plan (ASAP, frontend only)
 
-| Phase | Scope | Definition of done |
-| --- | --- | --- |
-| **0. Foundation** (≈1 day) | Scaffold Next.js + TS strict, pnpm, ESLint/Prettier/Stylelint, Husky, CI pipeline, Vercel project, `design/` served locally at `/__design` for side-by-side comparison (dev only), Playwright set up with the baseline screenshot harness | CI green on an empty app; `pnpm dev` shows both the original and the new app |
-| **1. Tokens, primitives, layout** (≈2 days) | `tokens.css`, `keyframes.css` (all 30+ keyframes copied verbatim), Inter via next/font, `<Icon>` (66 icons), UtilBar, SiteHeader (overlay/solid logic), LangSwitch, MobileNav, Footer, WhatsApp FAB, i18n routing + all strings moved to `messages/*.json` | Header/footer pixel-match at all breakpoints; language switching works |
-| **2. Content layer** (≈1 day) | All data from the `Component` class moved into typed `src/content/*` files with unit tests (every item has 3 languages, every image exists, ids are unique). Admin seed data dropped | Tests pass; no personal data in the bundle |
-| **3. Home, static sections** (≈3 days) | Hero layout, Marquee, CategoryGrid, PopularGrid, HowItWorks, Reviews, Journey (both), FAQ photo grid, Find us, VegLayers | Visual diff within threshold for each section |
-| **4. Motion and interaction** (≈3 days) | RevealProvider, InteractionEffects (ripple, sweep), ScrollFrameProvider, HeroSlider, ComboSlider, Gallery, JourneyVertical rider, FAQ accordion, reduced-motion handling | Every row of §1 has a passing Playwright behaviour test; manual sign-off on a real phone (iOS Safari + Android Chrome) |
-| **5. Menu page + cart + checkout** (≈4 days) | `/menu` with URL-synced category filter and search, HomeMenu filter, AddToCart, cart store with persistence/migration/tab sync, CartDrawer, CheckoutForm, Server Action, DB, notifications, rate limit, confirmation modal with the real order | A test order placed on the preview reaches the restaurant's phone and the customer's inbox |
-| **6. Hardening and launch** (≈2 days) | SEO (metadata, JSON-LD, sitemap, OG image), legal pages, a11y fixes, Lighthouse budgets, Sentry, security headers, 404/500 pages, domain + HTTPS, uptime monitor | Launch checklist (§8) all ticked |
-| **7. After launch** | Owner dashboard (orders board new → preparing → delivered, edit ETA, toggle item availability, edit prices) behind auth. The prototype already sketched this. Optionally a CMS, online card payments (Stripe/Redsys), pickup option in checkout (the FAQ already promises it) | Separate roadmap |
+Ranges assume one senior developer.
 
-Estimate: **about 3 weeks for one senior developer** to production launch (Phases 0–6).
+| # | Phase | Days | Done when |
+| --- | --- | --- | --- |
+| 0 | **Setup**: repo, Next.js, CI, Vercel preview, vendored runtime, parity harness skeleton | 1 | Original and empty port both render in the harness |
+| 1 | **Codemod + faithful port** of home, menu, drawers, modal; selectors ported; content files; cart store; `MenuRepository`/`OrderService` seams | 3–4 | Parity test passes at all viewports, states and languages |
+| 2 | **Next-native wiring**: locale routes (switch keeps scroll), `/menu?cat=` in URL, Madrid-time hours, hydration-safe cart, effects providers | 1–1.5 | Behaviour suite (every §1 row) green |
+| 3 | **Hardening**: performance (off-screen pause, images), non-visual a11y, SEO, security headers, Sentry, real-device recordings | 1.5–2 | §7 checklists ticked; client signs off the recordings |
+| 4 | **Launch**: domain, production deploy, smoke test | 0.5 | Live |
+| — | **Total to launch** | **≈ 7–9 working days** | |
+| 5 | **Refactor Step 2** to CSS Modules + tokens under the parity test (no visible change) | 3–4 | Code is maintainable; parity still green |
+| 6 | **Backend + admin** (when you're ready): Payload, Postgres, order board, alerts, emails | 6–9 | Implementations swapped behind the seams |
 
----
-
-## 5. Pixel-exact verification strategy
-
-"Keep it exactly as it is" has to be measured, not eyeballed.
-
-1. **The original is the baseline.** `design/` stays in the repo untouched. A Playwright project serves it (it needs network access for the unpkg React/Babel the runtime loads) and screenshots it.
-2. **Same screenshots of the Next.js build**, same pages and states:
-   - Viewports: **360, 390, 414, 768, 1024, 1280, 1440, 1920** wide (covers every breakpoint in §0.3)
-   - States: home top, home scrolled (header solid), each section, menu (all / tacos filter / search with no results), cart drawer (empty, with items, checkout with validation errors), confirmation modal, mobile nav open, each language.
-   - Animations frozen (`reducedMotion: 'reduce'`, autoplay timers stubbed, fonts awaited) so the pixels are stable.
-3. **Diff with `pixelmatch`**: threshold ≤ 0.1 % differing pixels per screenshot. Anything above that fails CI and has to be fixed or explicitly approved.
-4. **Motion is checked with behaviour tests**, not pixels: e.g. "after 5.5 s slide 2 is active", "header gets `data-overlay=false` after scrolling 25 px", "← key moves the combo slider", "the rider's `top` increases as the journey scrolls", "reveal elements reset when they leave the viewport".
-5. **Manual motion review**: screen recordings of old and new side by side for the hero, combos, journey, gallery and how-it-works, signed off by the designer/owner.
-6. Once the port is approved, the Next.js screenshots become the new baseline, so future PRs can't regress the look without anyone noticing.
+Why Step 2 waits until after launch: the faithful port is already correct and tested; refactoring first adds days and risk with no visible gain. It is scheduled, not optional, because inline-style code is expensive to maintain.
 
 ---
 
-## 6. Quality checklists
+## 9. Launch checklist
 
-### 6.1 Performance (budgets enforced in Lighthouse CI on mobile profile)
-
-- [ ] LCP < 2.5 s (hero slide 1 with `priority`, preloaded, AVIF), CLS < 0.05, INP < 200 ms, TBT < 200 ms
-- [ ] First-load JS on `/` ≤ 120 KB gzip. The prototype downloads React + ReactDOM + **Babel standalone** (~1.5 MB) and compiles the template in the browser; none of that ships
-- [ ] Hero slides 2–4 and the combo backgrounds load lazily after first paint
-- [ ] Veg decorations: `loading="lazy"`, `sizes` ≈ 160 px, decoded off the main thread
-- [ ] Only `transform`/`opacity`/`clip-path` animated. The desktop journey rider animates `left/top` in the design; keep the look but evaluate converting it to `offset-path` or transforms if it janks on low-end devices
-- [ ] Pause off-screen CSS loops (`animation-play-state` via IntersectionObserver) to save battery on mobile, with no visual change
-- [ ] Static generation (SSG) for all pages × 3 locales; ISR when content moves to a CMS
-
-### 6.2 Accessibility (WCAG 2.2 AA)
-
-Keep the visuals, fix the semantics:
-
-- [ ] Drawers and modal: `aria-modal="true"`, focus trap, **Esc closes**, focus returns to the trigger, background `inert`, body scroll lock (none of these exist in the prototype)
-- [ ] Payment options: wrap in `role="radiogroup"` with a label, arrow-key navigation
-- [ ] Form errors linked with `aria-describedby`, `aria-invalid`; focus the first invalid field on submit
-- [ ] Hero and combo autoplay: pause on hover/focus and when the tab is hidden (WCAG 2.2.2 requires a way to pause content that moves for more than 5 s; the dots can double as the control)
-- [ ] Gallery items reachable by keyboard (`button` or `tabindex`), real `alt` text for every content image (the design uses CSS backgrounds with no alt)
-- [ ] Decorative layers `aria-hidden` (already so in the design), icons `aria-hidden`, icon-only buttons labelled (already so)
-- [ ] Heading order check (the home page uses `h3` for product names inside sections that only have `h2` titles, which is fine; the menu page should keep a single `h1`)
-- [ ] Colour contrast audit with axe; see design questions in §9
-- [ ] Skip-to-content link (visually hidden until focused)
-
-### 6.3 SEO and local SEO
-
-- [ ] Per-locale `<title>`/description (the design's `<title>` and description are English while the default language is Spanish; write proper ES/CA/EN versions)
-- [ ] `hreflang` alternates + `x-default`, canonical URLs, `sitemap.xml`, `robots.txt`
-- [ ] JSON-LD: `Restaurant` (name, address in Badalona, geo, `openingHoursSpecification` 12:30–23:30 Sun–Thu / 12:30–00:00 Fri–Sat, `servesCuisine`, `priceRange`, `acceptsReservations: false`, `hasMenu`), `Menu`/`MenuItem` with prices, `FAQPage` for the FAQ
-- [ ] Open Graph / Twitter image generated with `next/og` in the brand style
-- [ ] Favicon set + web manifest (KF orange tile)
-- [ ] Google Business Profile linked (the Maps link is already in the design)
-
-### 6.4 Security
-
-- [ ] Strict security headers: CSP (self + Vercel analytics + Turnstile only), HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `frame-ancestors 'none'`
-- [ ] Zod validation on the server for every order field, length limits, phone normalisation
-- [ ] Rate limiting per IP + Turnstile + honeypot on the order action
-- [ ] Secrets only in Vercel env vars; `.env.example` documents them; nothing secret in the client bundle
-- [ ] Dependency scanning (Renovate + `pnpm audit` in CI), GitHub secret scanning on
-
-### 6.5 Code quality and maintainability
-
-- [ ] TypeScript strict, no `any`; content types make an invalid menu item a compile error
-- [ ] No inline style objects except genuinely dynamic values (e.g. a CSS variable for the slide index); everything else in CSS Modules using tokens
-- [ ] Each section component < ~200 lines, colocated `*.module.css`
-- [ ] Money as integer cents everywhere, formatted in one `formatPrice()`
-- [ ] Persisted store has a version number and a `migrate()` so a future change to the cart shape doesn't break returning visitors
-- [ ] `README` (setup, scripts, env vars, how to edit the menu, how to add a language), `CONTRIBUTING`, ADRs for the main decisions (CSS Modules over Tailwind, next-intl, Zustand, the DB choice)
-- [ ] PR template + CODEOWNERS; branch protection on `main` requiring CI
-
-### 6.6 CI/CD (GitHub Actions)
-
-```
-on PR:  install (cache) → lint (eslint, stylelint, prettier --check) → typecheck → unit tests
-        → build → e2e + a11y (axe) → visual regression → Lighthouse CI → bundle-size report
-        + Vercel preview deployment comment
-on main: same + production deploy, Sentry release with source maps
-nightly: Playwright smoke test against production (place a test order flagged as test)
-```
-
-### 6.7 Observability and operations
-
-- [ ] Sentry errors + performance; alert on any failed order action
-- [ ] Uptime monitor on `/` and `/api/health` (Better Stack / UptimeRobot)
-- [ ] Order notification failure → retry + fallback channel, so an order is never silently lost
-- [ ] Daily DB backups (Neon/Supabase built-in), documented restore
+- [ ] Parity + behaviour suites green on the production build; real-device recordings signed off
+- [ ] Lighthouse mobile ≥ 90 Performance, 100 SEO, 100 Best Practices (Accessibility will reflect the accepted contrast issues)
+- [ ] Checkout decision made: staging-only, or WhatsApp stopgap (§3)
+- [ ] Placeholder content replaced (§11 Q1); CI check for placeholder strings (`[certifying body`, `href="#"`) passes
+- [ ] Domain, HTTPS, `www` redirect, Search Console + sitemap, Google Business Profile website link
+- [ ] Sentry + uptime alerts routed
 
 ---
 
-## 7. Spain/EU compliance (needed before launch, confirm with the owner and their advisor)
+## 10. Risk register
 
-- [ ] **Aviso legal** (LSSI-CE): business name, NIF/CIF, registered address, contact email. Currently missing
-- [ ] **Política de privacidad** (RGPD/LOPDGDD): what the order form collects, why, how long it's kept, rights, data controller. Link it next to the "Place order" button
-- [ ] **Cookies**: if we stay cookieless (Plausible/Vercel analytics) and only use `localStorage` for the cart, a cookie banner isn't needed; we still need a cookie/storage policy page. Stop storing the customer's name/email/phone/address in `localStorage` (the prototype does)
-- [ ] **Allergens** (EU Reg. 1169/2011): info must be available before purchase. The design shows tags for gluten/dairy/egg/sesame plus a "please tell us" note; the owner must confirm the data for all 14 regulated allergens per dish
-- [ ] **Halal claim**: the FAQ literally says "certified by [certifying body — pending confirmation]". Content blocker: get the certifier's name or remove the claim
-- [ ] **Reviews**: "5.0 out of 5 · 3 verified reviews" with named reviewers and photos. EU consumer rules (Omnibus Directive) require "verified" claims to be backed by a real verification process. Use real reviews (e.g. pulled from Google) with consent, or drop "verified"
-- [ ] **Stats** "50.000+ orders delivered" and "92 % customers who come back" must be real figures
-- [ ] Prices shown include IVA, say so once (footer or menu)
-
----
-
-## 8. Launch checklist
-
-- [ ] All §1 behaviours pass; visual diff approved at all 8 viewports × 3 languages
-- [ ] Lighthouse mobile ≥ 95 Performance, 100 Accessibility, 100 Best Practices, 100 SEO
-- [ ] Real test order end-to-end on production (restaurant notified, customer email received)
-- [ ] Legal pages live and linked from the footer
-- [ ] Placeholder content replaced: social links (`href="#"` for Facebook and Twitter), Halal certifier, reviews, stats
-- [ ] Domain, HTTPS, `www` → apex redirect, Google Search Console + sitemap submitted, Business Profile website URL updated
-- [ ] Sentry + uptime alerts going to the owner/dev
-- [ ] Owner handover doc: how orders arrive, what to do if notifications stop
+| Risk | Likelihood | Impact | Mitigation |
+| --- | --- | --- | --- |
+| Visual drift during port | Medium | High | Codemod (faithful by construction) + structural parity gate on every commit |
+| Customers place orders that go nowhere before the backend exists | High if public | High | Staging-only checkout or WhatsApp stopgap (§3) |
+| Animation jank on low-end phones | Medium | Medium | Off-screen pause, real-device testing |
+| Backend later forces UI rework | Low | Medium | `MenuRepository` / `OrderService` seams and CMS-shaped types from day one |
+| Scope creep before launch | High | Medium | "Frontend only, exactly as designed" agreed up front |
 
 ---
 
-## 9. Design issues found (keep as-is by default, raise with the designer)
+## 11. Design issues and decisions needed
 
-These are in the export as delivered. The plan is to reproduce them exactly unless the owner says otherwise. Each is a one-line change.
+Per the pixel-exact decision these ship **as designed**; listed so nobody is surprised later.
 
-1. **Invisible focus state on checkout inputs**: `style-focus="border-color:#FFF8F2;box-shadow:0 0 0 2px #FFF8F2,0 0 0 4px #FFF8F2"` is cream on a cream background, so the focus ring disappears. Probably meant `#FF4D1C`. Accessibility fail, **recommend fixing**.
-2. **"Order now" outline button in Find us**: `border:2px solid #FFF8F2` on a `#FFEEE3` background is nearly invisible. Its hover is `#FF4D1C` with dark text.
-3. **Header cart button**: outer button and inner icon tile are both `#FF4D1C`, and the total text is dark (`#2C1D12`) while every other orange button uses white text. The cart stepper on cards also mixes dark and white.
-4. **Price format**: `7.90 €` (dot) in every language. Spanish/Catalan convention is `7,90 €`. Recommend `Intl.NumberFormat` per locale.
-5. **`<title>` and meta description are English** while the default language is Spanish.
-6. **Social links** for Facebook and Twitter point to `#`. Twitter's icon/name may need to become X.
-7. **The FAQ promises pickup** ("let us know when ordering") but checkout has no pickup option and always asks for an address.
-8. **Unused design system**: `_ds/organic` (Caprasimo, terracotta) isn't used by the page; confirm Inter + the orange palette is final.
+- Contrast below WCAG AA: muted text `#8A7160` on cream 4.33:1 and on peach 3.76:1; white on `#FF4D1C` buttons 3.32:1; orange prices 3.32:1; orange kickers on `#FFEEE3` 2.94:1.
+- Checkout inputs' focus ring is cream on cream (invisible).
+- "Order now" outline button in Find us has a near-invisible border.
+- Price format `7.90 €` in every language (kept).
+- `<title>`/description are English while the default language is Spanish. Non-visual, so **this will be fixed** with per-locale metadata.
+- "Abierto hoy" shows even when the shop is closed. Proposal: same pill, text switches to "Cerrado · abrimos a las 12:30", dot grey. **Needs sign-off.**
+- The FAQ promises pickup; checkout has no pickup option (post-launch).
 
----
-
-## 10. Questions for the owner (needed during Phase 5–6)
-
-1. Where should new orders arrive: WhatsApp (number 34683275326?), Telegram, email, or a tablet dashboard?
-2. Legal entity details for the Aviso legal (business name, NIF, address, contact email).
-3. Halal certifier name; confirmed allergen list per dish.
-4. Real reviews and statistics, or should we remove them?
-5. Real Facebook/Instagram/X links.
-6. Domain name, and is there an existing Google Business Profile?
-7. Should Catalan be fully translated (currently some strings fall back to Spanish)?
-8. Fix the design issues in §9 now, or reproduce exactly first and fix in a follow-up?
+**Questions for the client** (not blocking Phases 0–2):
+1. Real content: reviews, the "50.000+" and "92 %" stats, Halal certifier name, Facebook/Instagram/X links, photos of the actual dishes.
+2. Until the backend exists: keep checkout on staging only, or send orders as a WhatsApp message to the restaurant?
+3. Sign-off on the closed-state pill.
+4. Domain name; existing Google Business Profile?
