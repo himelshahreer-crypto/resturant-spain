@@ -328,6 +328,25 @@ What the harness taught us (now part of the fidelity contract):
 - Asset URLs must become absolute (`/assets/…`): the design's relative `assets/…` paths would break on `/menu/` and `/ca/`.
 - Switching between Spanish (`/`) and `/ca` or `/en` crosses root layouts, so it's a full page load; Phase 3 restores the scroll position.
 
+### Phase 2 status: done
+
+Result: **114/114 Playwright checks pass, twice in a row** (14 states × 8 widths, plus harness and smoke tests). Every element's position, size, text and computed style matches the original design.
+
+How the port works: `scripts/codemod/template-to-jsx.mjs` turns the design's template into `src/legacy/DesignTemplate.tsx`; `src/legacy/KebabApp.tsx` is a line-for-line port of the design's `Component` class (state, effects, view model), mounted once per locale layout by `AppShell`, with the URL selecting home or menu. Differences from the design are listed at the top of `KebabApp.tsx`.
+
+Parity states (each × 8 widths): home, home scrolled, menu (via click and direct load, es and en), tacos filter, empty search, cart drawer, checkout, checkout errors, confirmation modal, mobile nav, home in ca and en.
+
+What the parity test caught in Phase 2 (all fixed, now part of the fidelity contract):
+
+- **The Next.js CSS minifier changes the design's CSS.** It dropped `backdrop-filter` (kept only `-webkit-backdrop-filter`, which Chrome ignores: the glass cards lost their blur) and rewrote values. The design's CSS is now served unprocessed from `public/styles/`.
+- **How icons really render.** `<kf-i>` sets `inline-flex` on itself, but for icons in the first render React strips it right after mount, so they sit on the text baseline (a 17 px icon takes 21 px). Icons mounted later keep `inline-flex`. Verified with a mutation observer; `Icon` decides per instance when it mounts.
+- **Icon SVGs and page CSS.** The design drew icon SVGs in a shadow root; in the light DOM, `.kf-journey-road svg { position:absolute; width:100% }` would hit the journey's pin and rider icons. The icon SVG carries inline styles that restore the shadow-DOM defaults.
+- **The runtime wraps every text value** in `<span class="sc-interp">` and keeps whitespace text nodes that contain a space; the port renders the same nodes, so text wraps and line boxes match.
+- **The FAQ chevron never rotates in the design**: the transform is set on an inline element, where transforms don't apply. Reproduced as-is (listed in §11).
+- **Reveal flicker (a real design bug, reproduced as-is)**: an element that stops right at the 12 % visibility threshold can loop forever. Its reveal motion (26–36 px) moves it back across the threshold, which resets it, which moves it back again. At 1280 px with ~300 px scrolled, a visitor who stops there sees it pulse. Listed in §11 with a one-line fix (hysteresis, or observing a non-moving wrapper).
+- **Harness rules learned**: state flows click via DOM events (a real pointer leaves hover-triggered sweeps on whatever ends up under the cursor, which is timing-dependent; pointer effects get their own behaviour tests); settling waits on conditions with a capped fake-time budget, never fixed sleeps; a state can restrict comparison to the region it exists to check; every test closes its browser contexts (leaking them piled up dozens of renderer processes and was the root cause of the load-dependent failures); the fake clock is installed a minute early so `pauseAt` never targets the past.
+- **Hydration**: values that depend on the window or the clock (header overlay on wide screens, "open today" closing time) are computed after mount so server HTML and the first client render agree. Known regression to fix in Phase 3: on wide screens the port's first paint shows the solid header for a moment before it turns transparent over the hero (the design computes this before its first paint). Phase 3 moves the width check into CSS so the server HTML is already right. Same for Friday/Saturday closing time (00:00), which appears after mount.
+
 ## 9. Launch checklist
 
 - [ ] Parity + behaviour suites green on the production build; real-device recordings signed off
@@ -362,6 +381,8 @@ Per the pixel-exact decision these ship **as designed**; listed so nobody is sur
 - `<title>`/description are English while the default language is Spanish. Non-visual, so **this will be fixed** with per-locale metadata.
 - "Abierto hoy" shows even when the shop is closed. Proposal: same pill, text switches to "Cerrado · abrimos a las 12:30", dot grey. **Needs sign-off.**
 - The FAQ promises pickup; checkout has no pickup option (post-launch).
+- Reveal-on-scroll flicker: an element that stops right at the visibility threshold pulses forever, because its own reveal motion moves it back and forth across the threshold. Kept as designed; fix is a small hysteresis in the observer (or observing a wrapper that doesn't move).
+- The FAQ chevron is meant to rotate when a question opens, but never does (transform on an inline element). Kept as designed; a one-line fix if wanted.
 
 **Questions for the client** (not blocking Phases 1–3):
 

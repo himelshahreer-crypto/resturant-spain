@@ -3,8 +3,10 @@
 import { expect, test } from "@playwright/test";
 import { collect, ROOTS } from "./lib/collect";
 import { compareSnaps, formatDiffs } from "./lib/compare";
-import { openDesign } from "./lib/pages";
+import { closeOpenPages, openDesign } from "./lib/pages";
 import { expandToFullPage, settle } from "./lib/stabilize";
+
+test.afterEach(closeOpenPages);
 
 for (const width of [390, 1440]) {
   test(`baseline is deterministic at ${width}px`, async ({ browser }) => {

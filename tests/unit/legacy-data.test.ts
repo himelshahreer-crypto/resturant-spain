@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { loadDesignComponent, extractData } from "../../scripts/lib/design-extract.mjs";
-import * as D from "@/legacy/design-data";
+import { toDesignData } from "@/legacy/design-data";
+import { StaticMenuRepository } from "@/lib/menu/repository";
 
 const raw = extractData(loadDesignComponent()) as Record<string, unknown>;
+const D = toDesignData(await new StaticMenuRepository().load());
 
 describe("legacy design-shaped data equals the design's own data", () => {
   const pairs = [

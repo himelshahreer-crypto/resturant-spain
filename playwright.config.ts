@@ -7,6 +7,8 @@ export default defineConfig({
   testDir: "tests",
   testMatch: ["parity/**/*.spec.ts", "e2e/**/*.spec.ts"],
   fullyParallel: true,
+  // A parity test drives two full pages (design + port) through multi-step flows.
+  timeout: 120_000,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",

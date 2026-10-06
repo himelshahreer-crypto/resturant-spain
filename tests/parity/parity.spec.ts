@@ -1,25 +1,33 @@
 // Phase 2 gate: the port must match the design element by element at every
-// viewport and state. Enabled once pages are ported (PARITY_ENABLED=1, then by default).
+// viewport and state.
 import { expect, test } from "@playwright/test";
 import { collect, ROOTS } from "./lib/collect";
 import { compareSnaps, formatDiffs } from "./lib/compare";
-import { openDesign, openPort } from "./lib/pages";
+import { closeOpenPages, openDesign, openPort } from "./lib/pages";
 import { expandToFullPage, settle } from "./lib/stabilize";
 import { STATES, VIEWPORTS } from "./matrix";
 
-test.skip(!process.env.PARITY_ENABLED, "Enabled in Phase 2, once the pages are ported");
+test.afterEach(closeOpenPages);
 
 for (const state of STATES) {
   for (const width of VIEWPORTS) {
+    if (state.widths && !state.widths(width)) continue;
     test(`${state.name} @ ${width}px matches the design`, async ({ browser }) => {
-      const design = await openDesign(browser, { width });
-      const port = await openPort(browser, { width, path: state.portPath });
+      const design = await openDesign(browser, { width, lang: state.designLang, view: state.designView });
+      const port = await openPort(browser, { width, path: state.portPath ?? "/" });
       for (const page of [design, port]) {
         if (state.act) await state.act(page);
-        await expandToFullPage(page);
-        await settle(page);
+        if (!state.viewportOnly) await expandToFullPage(page);
+        await settle(
+          page,
+          state.scope && `${page === design ? ROOTS.design : ROOTS.port} ${state.scope.replace(":scope ", "")}`,
+        );
       }
-      const diffs = compareSnaps(await collect(design, ROOTS.design), await collect(port, ROOTS.port));
+      const diffs = compareSnaps(
+        await collect(design, ROOTS.design, state.scope),
+        await collect(port, ROOTS.port, state.scope),
+      );
+      if (state.scope) expect((await collect(port, ROOTS.port, state.scope)).length).toBeGreaterThan(20);
       expect(diffs, formatDiffs(diffs)).toEqual([]);
     });
   }

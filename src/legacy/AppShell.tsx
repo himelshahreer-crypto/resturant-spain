@@ -2,6 +2,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import type { Locale } from "@/content/types";
 import { localePrefix } from "@/i18n/config";
+import type { DesignData } from "./design-data";
 import { KebabApp, type View } from "./KebabApp";
 
 const viewFromPath = (pathname: string): View => (/\/menu\/?$/.test(pathname) ? "menu" : "home");
@@ -12,11 +13,12 @@ const pathFor = (locale: Locale, view: View) => `${localePrefix(locale)}${view =
  * filters, slider position) survives navigation between / and /menu/,
  * just like the single-page design. The URL decides the view.
  */
-export function AppShell({ locale }: { locale: Locale }) {
+export function AppShell({ locale, data }: { locale: Locale; data: DesignData }) {
   const pathname = usePathname();
   const router = useRouter();
   return (
     <KebabApp
+      data={data}
       view={viewFromPath(pathname)}
       locale={locale}
       navigate={(view) => router.push(pathFor(locale, view), { scroll: false })}

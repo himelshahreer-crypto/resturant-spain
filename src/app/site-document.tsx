@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { Locale } from "@/content/types";
 import { AppShell } from "@/legacy/AppShell";
+import { toDesignData } from "@/legacy/design-data";
+import { getMenuRepository } from "@/lib/menu/repository";
 
 /**
  * The design's CSS is served as-is from public/styles, not through the Next.js CSS pipeline:
@@ -13,7 +15,9 @@ const STYLESHEETS = ["/styles/fonts.css", "/styles/runtime-parity.css", "/styles
  * The <html>/<body> shell shared by every root layout (one per locale group).
  * The whole UI lives in <AppShell> (the faithful port); pages only select the URL.
  */
-export function SiteDocument({ locale, children }: { locale: Locale; children: ReactNode }) {
+export async function SiteDocument({ locale, children }: { locale: Locale; children: ReactNode }) {
+  // Content is loaded through the MenuRepository seam at build time (static export).
+  const data = toDesignData(await getMenuRepository().load());
   return (
     <html lang={locale}>
       <head>
@@ -26,7 +30,7 @@ export function SiteDocument({ locale, children }: { locale: Locale; children: R
         {/* Same wrapper depth as the design runtime (#dc-root > .sc-host), see runtime-parity.css */}
         <div id="kf-root">
           <div className="kf-host">
-            <AppShell locale={locale} />
+            <AppShell locale={locale} data={data} />
             {children}
           </div>
         </div>

@@ -98,9 +98,9 @@ const ATTRS = [
  * Icons (`<kf-i>` in the design, `<span data-icon>` in the port) are compared
  * as one unit by name and box; their SVG internals are covered by unit tests.
  */
-export async function collect(page: Page, rootSelector: string): Promise<Snap[]> {
+export async function collect(page: Page, rootSelector: string, scope?: string): Promise<Snap[]> {
   return page.evaluate(
-    ({ rootSelector, props, attrs }) => {
+    ({ rootSelector, scope, props, attrs }) => {
       const origin = location.origin;
       const norm = (v: string) =>
         v
@@ -148,9 +148,11 @@ export async function collect(page: Page, rootSelector: string): Promise<Snap[]>
           if (!skip.has(c.tagName) && !c.hasAttribute("data-fx") && !isEffect(c))
             walk(c, `${path} > ${c.tagName.toLowerCase()}[${i++}]`);
       };
-      document.querySelectorAll(rootSelector).forEach((el, i) => walk(el, `root[${i}]`));
+      const roots = [...document.querySelectorAll(rootSelector)];
+      const targets = scope ? roots.flatMap((r) => [...r.querySelectorAll(scope)]) : roots;
+      targets.forEach((el, i) => walk(el, `root[${i}]`));
       return out;
     },
-    { rootSelector, props: STYLE_PROPS as unknown as string[], attrs: ATTRS },
+    { rootSelector, scope, props: STYLE_PROPS as unknown as string[], attrs: ATTRS },
   );
 }

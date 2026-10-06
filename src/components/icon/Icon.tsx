@@ -1,4 +1,6 @@
-import type { CSSProperties } from "react";
+"use client";
+import { useState, type CSSProperties } from "react";
+import { isAppMounted } from "./mount-phase";
 import { ICON_PATHS, type IconName } from "./paths";
 
 export type { IconName };
@@ -16,21 +18,28 @@ interface IconProps {
 
 /**
  * Port of the design's `<kf-i>` web component (design/kf-icons.js), as it actually
- * renders in the approved design:
+ * renders in the approved design. Verified in the browser with a mutation observer:
  *
- * - kf-icons.js sets `display:inline-flex; flex:none; line-height:0` on the host, but the
- *   design runtime (React) then rewrites the host's `style` attribute, so those never apply
- *   (verified: every `<kf-i>` has `style=""` or only the author's style). The host is a plain
- *   inline element and the SVG sits on the text baseline, which adds the descender gap under
- *   each icon (a 17px icon occupies 21px). The port reproduces that, not the intended styles.
- * - The design drew the SVG inside a shadow root, so page rules such as
- *   `.kf-journey-road svg { position:absolute; inset:0; width:100%; … }` never reached it.
- *   Here the SVG is in the light DOM, so it carries inline styles that restore the shadow-DOM
- *   defaults (inline beats the non-!important design CSS).
+ * - kf-icons.js sets `display:inline-flex; flex:none; line-height:0` on itself when it
+ *   connects. For icons present in the app's FIRST render, React strips those three
+ *   properties right after mount (the author's own style, e.g. a colour, stays). Those
+ *   icons are plain inline elements whose SVG sits on the text baseline, which adds the
+ *   descender gap under each icon (a 17px icon occupies 21px).
+ * - Icons mounted LATER (the cart stepper, the menu page after navigating, …) keep the
+ *   component's styles, merged after the author's.
+ *
+ * So each instance decides once, when it mounts, which of the two it is.
+ *
+ * The design drew the SVG inside a shadow root, so page rules such as
+ * `.kf-journey-road svg { position:absolute; inset:0; width:100%; … }` never reached it.
+ * Here the SVG is in the light DOM, so it carries inline styles that restore the shadow-DOM
+ * defaults (inline beats the non-!important design CSS).
  */
 export function Icon({ name, size = 20, stroke = 2.5, style, className }: IconProps) {
+  const [mountedLater] = useState(isAppMounted);
+  const hostStyle = mountedLater ? { ...style, flex: "0 0 auto", display: "inline-flex", lineHeight: 0 } : style;
   return (
-    <span data-icon={name} className={className} style={style}>
+    <span data-icon={name} className={className} style={hostStyle}>
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width={size}

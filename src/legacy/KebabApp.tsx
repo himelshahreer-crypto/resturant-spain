@@ -11,17 +11,22 @@
 //    server-rendered HTML and the first client render are identical (no hydration mismatch).
 //    Window-dependent values (navWide, scrolled) and the clock (`now`) are also set after mount.
 // 3. UI strings come from src/messages (extracted from the design; unit-tested identical).
-// 4. The admin-prototype leftovers (seeded fake orders, HERO/heroDish, JOURNEY_AMBIENT) are dropped.
-// 5. Asset URLs are absolute (/assets/…) so they work on /menu/ and /ca/.
+// 4. Content arrives as a prop (MenuRepository seam) and orders go through OrderService.
+// 5. The admin-prototype leftovers (seeded fake orders, HERO/heroDish, JOURNEY_AMBIENT) are dropped.
+// 6. Asset URLs are absolute (/assets/…) so they work on /menu/ and /ca/.
 import { Component, createElement, useEffect, useRef } from "react";
 import type { Locale } from "@/content/types";
 import { getMessages, format } from "@/i18n/messages";
+import { markAppMounted } from "@/components/icon/mount-phase";
 import { DesignTemplate } from "./DesignTemplate";
-import { ALLERGENS, CATS, FAQ, GALLERY, ITEMS, JOURNEY, POPULAR, REVIEWS, SLIDES, TIMELINE } from "./design-data";
+import type { DesignData } from "./design-data";
+import { getOrderService, type PlacedOrder } from "@/lib/orders/service";
 
 export type View = "home" | "menu";
 
 interface Props {
+  /** Site content in the design's data shapes (loaded through the MenuRepository at build time). */
+  data: DesignData;
   view: View;
   locale: Locale;
   /** Client-side navigation to the given view in the current locale. */
@@ -141,8 +146,8 @@ export class KebabApp extends Component<Props, any> {
       // Window-dependent: set in componentDidMount (the design read window here).
       scrolled: false,
       navWide: false,
-      cats: CATS.map((c) => ({ ...c })),
-      items: ITEMS.map((i) => ({ ...i })),
+      cats: this.props.data.CATS.map((c) => ({ ...c })),
+      items: this.props.data.ITEMS.map((i) => ({ ...i })),
       orders: [] as any[],
       // Clock: set in componentDidMount so server and first client render agree.
       now: undefined as number | undefined,
@@ -302,6 +307,8 @@ export class KebabApp extends Component<Props, any> {
       it.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
     };
     document.addEventListener("click", this.onGalleryClick);
+    // Icons mounted from now on render like the design's later-mounted <kf-i> (see Icon.tsx).
+    markAppMounted();
     // Signals that effects are wired (used by the parity harness; no visual effect).
     document.documentElement.setAttribute("data-kf-ready", "");
   }
@@ -368,7 +375,7 @@ export class KebabApp extends Component<Props, any> {
     clearInterval(this.slideT);
     this.slideT = setInterval(() => {
       if (this.state.view === "home" && this.props.motion !== false)
-        this.setState((st: any) => ({ heroIdx: ((st.heroIdx || 0) + 1) % SLIDES.length }));
+        this.setState((st: any) => ({ heroIdx: ((st.heroIdx || 0) + 1) % this.props.data.SLIDES.length }));
     }, 5500);
   }
   restartCombos() {
@@ -509,7 +516,10 @@ export class KebabApp extends Component<Props, any> {
   }
   itemVM(it: any, i: number) {
     const q = this.state.cart[it.id] || 0;
-    const alg = (it.alg || []).map((code: string) => ({ code, name: this.L((ALLERGENS as any)[code]) }));
+    const alg = (it.alg || []).map((code: string) => ({
+      code,
+      name: this.L((this.props.data.ALLERGENS as any)[code]),
+    }));
     const isHalal = !!it.halal;
     return {
       ...this.vis(it),
@@ -590,6 +600,8 @@ export class KebabApp extends Component<Props, any> {
       confirm: o.id,
       now: Date.now(),
     });
+    // Backend seam: today a no-op (the design keeps orders in the browser only).
+    void getOrderService().submit(o as PlacedOrder);
   }
   setLang(l: Locale) {
     if (l === this.props.locale) return;
@@ -635,7 +647,7 @@ export class KebabApp extends Component<Props, any> {
     const combosList = s.items.filter((i: any) => i.cat === "combos");
     const ci = (s.combosIdx || 0) % (combosList.length || 1);
     const combo = combosList[ci];
-    const popularItems = POPULAR.map((p, i) => {
+    const popularItems = this.props.data.POPULAR.map((p, i) => {
       const it = s.items.find((x: any) => x.id === p.id);
       if (!it) return null;
       return { ...this.itemVM(it, i), feats: p.feats.map((f) => L(f)) };
@@ -816,7 +828,7 @@ export class KebabApp extends Component<Props, any> {
       .split(",")
       .map((x) => x.trim())
       .filter(Boolean);
-    const SL = SLIDES.map((x, i) => ({ ...x, video: vids[i] || "" })),
+    const SL = this.props.data.SLIDES.map((x, i) => ({ ...x, video: vids[i] || "" })),
       hi = (s.heroIdx || 0) % SL.length,
       curS = SL[hi],
       curIt = s.items.find((i: any) => i.id === curS.id);
@@ -939,8 +951,8 @@ export class KebabApp extends Component<Props, any> {
       })),
       homeChips,
       homeSections,
-      journeyStops: JOURNEY.map((st, i) => {
-        const m = st.tIdx != null ? TIMELINE[st.tIdx] : null;
+      journeyStops: this.props.data.JOURNEY.map((st, i) => {
+        const m = st.tIdx != null ? this.props.data.TIMELINE[st.tIdx] : null;
         const hxArr = [10, 36.7, 63.3, 90],
           hyArr = [51.5, 20, 80, 51.5],
           hDelays = [0, 3.2, 6.4, 9.6];
@@ -963,11 +975,11 @@ export class KebabApp extends Component<Props, any> {
           hDelay: hDelays[i],
         };
       }),
-      galleryItems: GALLERY.map((g: any) => {
+      galleryItems: this.props.data.GALLERY.map((g: any) => {
         const it = g.itemId ? s.items.find((x: any) => x.id === g.itemId) : null;
         return { bg: "url(/assets/food/" + g.img + ")", name: it ? L(it.name) : L(g.name) };
       }),
-      faq: FAQ.map((f, i) => {
+      faq: this.props.data.FAQ.map((f, i) => {
         const faqOpen = s.faqOpen || [],
           open = faqOpen.includes(i);
         return {
@@ -995,7 +1007,7 @@ export class KebabApp extends Component<Props, any> {
             all: () => this.go("menu", { cat: ["combos"], q: "" }),
           }
         : { name: "", desc: "", priceTxt: "", btn: "", add: () => {}, all: () => {} },
-      reviews: REVIEWS.map((r, i) => {
+      reviews: this.props.data.REVIEWS.map((r, i) => {
         const it = s.items.find((x: any) => x.id === r.itemId);
         return {
           name: r.name,

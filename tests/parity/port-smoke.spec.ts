@@ -1,7 +1,9 @@
 // The static export serves every locale and view with the right document
 // language, the self-hosted Inter font, icons and no runtime errors.
 import { expect, test } from "@playwright/test";
-import { openPort } from "./lib/pages";
+import { closeOpenPages, openPort } from "./lib/pages";
+
+test.afterEach(closeOpenPages);
 
 for (const [path, lang] of [
   ["/", "es"],
