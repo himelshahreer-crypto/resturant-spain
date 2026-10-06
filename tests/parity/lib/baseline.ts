@@ -35,7 +35,7 @@ export async function routeDesignRuntime(context: BrowserContext) {
  * so baseline and port render with identical font binaries, offline.
  */
 export async function routeDesignFonts(context: BrowserContext) {
-  const css = readFileSync(join(process.cwd(), "src/styles/fonts.css"), "utf8").replaceAll(
+  const css = readFileSync(join(process.cwd(), "public/styles/fonts.css"), "utf8").replaceAll(
     "/fonts/",
     "https://fonts.gstatic.com/kf/",
   );

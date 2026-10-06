@@ -1,9 +1,5 @@
-import { notFound } from "next/navigation";
-import { isLocale } from "@/i18n/config";
-import { Phase1Placeholder } from "../../phase1-placeholder";
-
-export default async function HomeIntl({ params }: { params: Promise<{ locale: string }> }) {
-  const { locale } = await params;
-  if (!isLocale(locale)) notFound();
-  return <Phase1Placeholder locale={locale} />;
+// The UI is rendered by <AppShell> in the root layout (faithful port of the
+// single-page design); this route only exists so the URL selects the view.
+export default function Page() {
+  return null;
 }

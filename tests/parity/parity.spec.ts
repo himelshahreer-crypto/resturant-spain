@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 import { collect, ROOTS } from "./lib/collect";
 import { compareSnaps, formatDiffs } from "./lib/compare";
 import { openDesign, openPort } from "./lib/pages";
-import { expandToFullPage } from "./lib/stabilize";
+import { expandToFullPage, settle } from "./lib/stabilize";
 import { STATES, VIEWPORTS } from "./matrix";
 
 test.skip(!process.env.PARITY_ENABLED, "Enabled in Phase 2, once the pages are ported");
@@ -16,7 +16,8 @@ for (const state of STATES) {
       const port = await openPort(browser, { width, path: state.portPath });
       for (const page of [design, port]) {
         if (state.act) await state.act(page);
-        if (state.fullPage) await expandToFullPage(page);
+        await expandToFullPage(page);
+        await settle(page);
       }
       const diffs = compareSnaps(await collect(design, ROOTS.design), await collect(port, ROOTS.port));
       expect(diffs, formatDiffs(diffs)).toEqual([]);

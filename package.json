@@ -15,7 +15,8 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "fonts": "node scripts/fetch-fonts.mjs",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "extract:content": "node scripts/extract-content.mjs"
+    "extract:content": "node scripts/extract-content.mjs",
+    "codemod": "node scripts/codemod/template-to-jsx.mjs"
   },
   "dependencies": {
     "next": "16.3.8",
@@ -30,6 +31,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
+    "parse5": "^7.3.0",
     "prettier": "^3.9.9",
     "react-dom18-umd": "npm:react-dom@18.3.1",
     "react18-umd": "npm:react@18.3.1",

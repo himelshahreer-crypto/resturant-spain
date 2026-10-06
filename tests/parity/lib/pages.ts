@@ -1,7 +1,7 @@
 import type { Browser, Page } from "@playwright/test";
 import { DESIGN_URL, PORT_URL } from "../../../playwright.config";
 import { prepareDesignContext } from "./baseline";
-import { freezeTime, settle } from "./stabilize";
+import { freezeTime, loadAssets } from "./stabilize";
 
 export interface OpenOptions {
   width: number;
@@ -9,7 +9,7 @@ export interface OpenOptions {
   path?: string;
 }
 
-/** Opens the original design (offline, frozen clock) and waits until it's settled. */
+/** Opens the original design (offline, paused clock). Call settle() before capturing. */
 export async function openDesign(browser: Browser, { width, height = 900 }: OpenOptions): Promise<Page> {
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" });
   await prepareDesignContext(context);
@@ -17,7 +17,7 @@ export async function openDesign(browser: Browser, { width, height = 900 }: Open
   await freezeTime(page);
   await page.goto(`${DESIGN_URL}/`);
   await page.waitForSelector("#dc-root main");
-  await settle(page);
+  await loadAssets(page);
   return page;
 }
 
@@ -27,6 +27,8 @@ export async function openPort(browser: Browser, { width, height = 900, path = "
   const page = await context.newPage();
   await freezeTime(page);
   await page.goto(`${PORT_URL}${path}`);
-  await settle(page);
+  // Wait for hydration: KebabApp sets this once its effects (reveal, sweep…) are wired.
+  await page.waitForSelector("html[data-kf-ready]", { state: "attached" });
+  await loadAssets(page);
   return page;
 }

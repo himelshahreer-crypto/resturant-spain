@@ -1,8 +1,6 @@
 # The original design export is the fidelity baseline: never reformat it.
 design/
 # Generated or verbatim-copied files
-src/styles/design.css
-src/styles/fonts.css
 src/components/icon/paths.ts
 src/content/menu.ts
 src/content/home.ts
@@ -11,3 +9,4 @@ public/
 out/
 .next/
 pnpm-lock.yaml
+src/legacy/DesignTemplate.tsx

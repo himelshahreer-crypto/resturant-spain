@@ -4,14 +4,16 @@ import { expect, test } from "@playwright/test";
 import { collect, ROOTS } from "./lib/collect";
 import { compareSnaps, formatDiffs } from "./lib/compare";
 import { openDesign } from "./lib/pages";
-import { expandToFullPage } from "./lib/stabilize";
+import { expandToFullPage, settle } from "./lib/stabilize";
 
 for (const width of [390, 1440]) {
   test(`baseline is deterministic at ${width}px`, async ({ browser }) => {
     const a = await openDesign(browser, { width });
     const b = await openDesign(browser, { width });
-    await expandToFullPage(a);
-    await expandToFullPage(b);
+    for (const p of [a, b]) {
+      await expandToFullPage(p);
+      await settle(p);
+    }
     const [sa, sb] = [await collect(a, ROOTS.design), await collect(b, ROOTS.design)];
     expect(sa.length).toBeGreaterThan(500);
     const diffs = compareSnaps(sa, sb);

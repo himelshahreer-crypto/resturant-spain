@@ -22,4 +22,4 @@ for (const [, subset, block] of blocks) {
   out += `/* ${subset} */\n${block.replace(url, `/fonts/${file}`)}\n`;
   console.log(`${file}  ${buf.length} bytes`);
 }
-await writeFile("src/styles/fonts.css", out);
+await writeFile("public/styles/fonts.css", out);

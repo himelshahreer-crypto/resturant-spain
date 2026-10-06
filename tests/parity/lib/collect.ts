@@ -127,7 +127,9 @@ export async function collect(page: Page, rootSelector: string): Promise<Snap[]>
         for (const p of props) style[p] = norm(cs.getPropertyValue(p));
         const a: Record<string, string> = {};
         for (const n of attrs) {
-          const v = el.getAttribute(n);
+          let v = el.getAttribute(n);
+          // Compare where src/href point, not how they're written (assets/x vs /assets/x).
+          if (v != null && (n === "src" || n === "href") && !v.startsWith("#")) v = new URL(v, location.href).href;
           if (v != null) a[n] = norm(v);
         }
         let text = "";
