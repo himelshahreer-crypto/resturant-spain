@@ -364,6 +364,8 @@ What the parity test caught in Phase 2 (all fixed, now part of the fidelity cont
 - **Accessibility layer** (`src/legacy/a11y.ts`, no visual change): modal dialogs with focus moved in and restored, Tab trapped, Esc closes, background inert; payment as a radio group with arrow keys; form errors linked to fields; product photos labelled; gallery operable by keyboard; skip link. Parity ignores only the attributes this layer adds on elements it marks.
 - **SEO**: per-locale titles/descriptions, canonical + hreflang (x-default = es), Open Graph/Twitter, JSON-LD (`Restaurant` with opening hours, full `Menu` with prices and halal, `FAQPage`), sitemap, robots, manifest, icons from the design's "KF" tile. Needs the real domain via `SITE_URL`.
 - **Security & hosting**: strict per-page CSP (script hashes, no `unsafe-inline` for scripts), verified to produce zero violations and to fail when a hash is removed; `deploy/.htaccess` and `deploy/nginx.conf` with caching, image negotiation, compression and security headers; stylesheets versioned by content hash. See `docs/DEPLOYMENT.md`.
+- Server configs verified on real Apache 2.4 and Nginx 1.24. That caught two bugs before they shipped: JS wasn't gzipped on Apache (`text/javascript` missing from the compression list), and the first Nginx draft served every page as `text/plain` (a `types {}` block replaces the MIME table) and lost all security headers inside `location`s (Nginx drops inherited `add_header`s there).
+- Follow-up: the 404 page is Next.js's default (English, unbranded); a design-styled 404 needs a small design decision.
 - Not done (needs accounts): Sentry and analytics. Both are a few lines once a DSN / site ID exists.
 
 ## 9. Launch checklist

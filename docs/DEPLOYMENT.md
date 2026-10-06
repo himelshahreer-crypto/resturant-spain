@@ -36,6 +36,8 @@ Upload **the contents of `out/`** (not the folder itself) to the web root, inclu
 
 ## 3. Server configuration
 
+Both configurations were tested against the built site on Apache 2.4 and Nginx 1.24: content types, `/menu` → `/menu/` redirects, 404, AVIF/WebP negotiation with `Vary: Accept`, gzip, caching per path, every security header on every path, and a real browser session with zero errors or CSP violations.
+
 ### Apache / cPanel / most shared hosting
 
 Nothing to do: `out/.htaccess` is uploaded with the site. It needs `mod_rewrite`, `mod_headers` and `mod_deflate`, which almost every host enables. It:
