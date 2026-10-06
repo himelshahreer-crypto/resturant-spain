@@ -38,6 +38,8 @@ interface Props {
 }
 
 const STORAGE_KEY = "kf4";
+/** sessionStorage: scroll position to restore after a language switch (set by AppShell). */
+export const SCROLL_KEY = "kf-scroll";
 
 function Slider(p: { slides: any[]; idx: number }) {
   const ref = useRef<HTMLDivElement>(null),
@@ -156,6 +158,12 @@ export class KebabApp extends Component<Props, any> {
   state: any = this.fresh();
 
   componentDidMount() {
+    // After a language switch (a full page load), return to the same scroll position.
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || "null");
+      sessionStorage.removeItem(SCROLL_KEY);
+      if (saved && saved.path === location.pathname) window.scrollTo({ top: saved.y, behavior: "instant" });
+    } catch {}
     // Restore saved state (the design did this in its state initializer).
     try {
       const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
@@ -172,9 +180,15 @@ export class KebabApp extends Component<Props, any> {
           lang: this.props.locale,
         });
     } catch {}
+    // A shared/bookmarked /menu/?cat=… link opens with that filter (wins over the saved one).
+    const urlCats = this.catsFromUrl();
+    if (this.props.view === "menu" && urlCats) this.setState({ cat: urlCats });
     this._scrolled = scrollY > 24;
     this._wide = innerWidth >= 900;
-    this.setState({ now: Date.now(), scrolled: this._scrolled, navWide: this._wide });
+    // Once the real header state is rendered, hand over from prehydrate.css to the inline styles.
+    this.setState({ now: Date.now(), scrolled: this._scrolled, navWide: this._wide }, () =>
+      document.documentElement.removeAttribute("data-kf-pre"),
+    );
 
     document.documentElement.lang = this.props.locale;
     this._revealed = new WeakSet();
@@ -326,7 +340,25 @@ export class KebabApp extends Component<Props, any> {
     if (this.io) this.io.disconnect();
     window.removeEventListener("storage", this.onStorage);
   }
+  /** Category ids from ?cat=a,b in the URL, or null when absent. Unknown ids are ignored. */
+  catsFromUrl(): string[] | null {
+    const raw = new URLSearchParams(location.search).get("cat");
+    if (raw == null) return null;
+    const known = new Set(this.props.data.CATS.map((c) => c.id));
+    return raw.split(",").filter((id) => known.has(id));
+  }
+  /** Mirrors the menu filter into the URL (/menu/?cat=tacos) without adding history entries. */
+  syncCatsToUrl() {
+    if (this.props.view !== "menu" || this.state.view !== "menu") return;
+    const cats: string[] = Array.isArray(this.state.cat) ? this.state.cat : [];
+    const search = cats.length ? "?cat=" + cats.join(",") : "";
+    if (location.search !== search) history.replaceState(history.state, "", location.pathname + search + location.hash);
+  }
   componentDidUpdate(prevProps: Props) {
+    // Arriving on /menu/ (incl. back/forward): a ?cat= in the URL wins; otherwise mirror the state.
+    const urlCats = prevProps.view !== this.props.view && this.props.view === "menu" ? this.catsFromUrl() : null;
+    if (urlCats && urlCats.join(",") !== (this.state.cat || []).join(",")) this.setState({ cat: urlCats });
+    else this.syncCatsToUrl();
     // Browser back/forward between / and /menu/.
     if (prevProps.view !== this.props.view && this.state.view !== this.props.view)
       this.setState({ view: this.props.view });

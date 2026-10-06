@@ -14,7 +14,6 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     ...devices["Desktop Chrome"],
-    contextOptions: { reducedMotion: "reduce" },
     deviceScaleFactor: 1,
     trace: "retain-on-failure",
   },
