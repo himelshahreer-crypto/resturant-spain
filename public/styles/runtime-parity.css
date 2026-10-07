@@ -1,0 +1,12 @@
+/* Rules the design's preview runtime (design/support.js) injects at runtime.
+   They shape the layout the design was approved in, so the port reproduces them.
+   #kf-root/.kf-host stand in for the runtime's #dc-root/.sc-host wrappers. */
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+#kf-root,
+#kf-root > .kf-host {
+  height: 100%;
+}
